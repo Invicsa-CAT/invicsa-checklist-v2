@@ -1,73 +1,40 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../lib/api';
 import * as drafts from '../lib/draftStorage';
+import { useAuth } from '../contexts/AuthContext';
 import Header from '../components/Header';
 import Button from '../components/Button';
+import Input from '../components/Input';
 import ChecklistItem from '../components/ChecklistItem';
 import MapDrawer from '../components/MapDrawer';
 import SignaturePad from '../components/SignaturePad';
 
-// Estructura del Apéndice 4 según plantilla del Manual de Operaciones.
-// Sección 0.4 incluye sub-ítems condicionales (si "padre" es Sí, se habilita el hijo).
-
 const ZONAS_GEOGRAFICAS = [
-  {
-    code: '0.4.1',
-    label: 'Espacio aéreo controlado y FIZ',
-    children: [
-      { code: '0.4.1.1', label: 'Estudio aeronáutico de seguridad con ATSP' }
-    ]
-  },
-  {
-    code: '0.4.2',
-    label: 'Entorno de aeródromos o helipuertos',
-    children: [
-      { code: '0.4.2.1', label: 'Coordinación previa con el gestor' }
-    ]
-  },
-  {
-    code: '0.4.3',
-    label: 'Zonas prohibidas, restringidas',
-    children: [
-      { code: '0.4.3.1', label: 'Cumple condiciones o cuenta con autorización' }
-    ]
-  },
-  {
-    code: '0.4.4',
-    label: 'Zonas de seguridad militar',
-    children: [
-      { code: '0.4.4.1', label: 'Permiso previo del titular/gestor' }
-    ]
-  },
-  {
-    code: '0.4.5',
-    label: 'Instalaciones de servicios esenciales',
-    children: [
-      { code: '0.4.5.1', label: 'Permiso previo del titular/gestor' }
-    ]
-  },
-  {
-    code: '0.4.6',
-    label: 'Entornos urbanos',
-    children: [
-      { code: '0.4.6.1a', label: 'Cumple distancias a edificios' },
-      { code: '0.4.6.1b', label: 'Comunicación al Min. Interior (5 días)' }
-    ]
-  },
-  {
-    code: '0.4.7',
-    label: 'Zona Restringida al Vuelo Fotográfico',
-    children: [
-      { code: '0.4.7.1', label: 'Permiso del CECAF' }
-    ]
-  },
-  {
-    code: '0.4.8',
-    label: 'Zonas de protección medioambiental',
-    children: [
-      { code: '0.4.8.1', label: 'Coordinación con gestor del espacio' }
-    ]
-  }
+  { code: '0.4.1', label: 'Espacio aéreo controlado y FIZ', children: [
+    { code: '0.4.1.1', label: 'Estudio aeronáutico de seguridad con ATSP' }
+  ]},
+  { code: '0.4.2', label: 'Entorno de aeródromos o helipuertos', children: [
+    { code: '0.4.2.1', label: 'Coordinación previa con el gestor' }
+  ]},
+  { code: '0.4.3', label: 'Zonas prohibidas, restringidas', children: [
+    { code: '0.4.3.1', label: 'Cumple condiciones o cuenta con autorización' }
+  ]},
+  { code: '0.4.4', label: 'Zonas de seguridad militar', children: [
+    { code: '0.4.4.1', label: 'Permiso previo del titular/gestor' }
+  ]},
+  { code: '0.4.5', label: 'Instalaciones de servicios esenciales', children: [
+    { code: '0.4.5.1', label: 'Permiso previo del titular/gestor' }
+  ]},
+  { code: '0.4.6', label: 'Entornos urbanos', children: [
+    { code: '0.4.6.1a', label: 'Cumple distancias a edificios' },
+    { code: '0.4.6.1b', label: 'Comunicación al Min. Interior (5 días)' }
+  ]},
+  { code: '0.4.7', label: 'Zona Restringida al Vuelo Fotográfico', children: [
+    { code: '0.4.7.1', label: 'Permiso del CECAF' }
+  ]},
+  { code: '0.4.8', label: 'Zonas de protección medioambiental', children: [
+    { code: '0.4.8.1', label: 'Coordinación con gestor del espacio' }
+  ]}
 ];
 
 const REQUISITOS = [
@@ -82,7 +49,7 @@ const REQUISITOS = [
   { code: '0.6.2.2', label: 'Solicitud NOTAM a COOP ENAIRE si procede' }
 ];
 
-function buildInitialState() {
+function buildInitialState(defaultFirmanteName) {
   const items = {};
   ZONAS_GEOGRAFICAS.forEach(z => {
     items[z.code] = null;
@@ -93,41 +60,45 @@ function buildInitialState() {
     items,
     map: { geografia: null, contingencia: null, grb: null, snapshot: null },
     firma: null,
+    firmanteName: defaultFirmanteName || '',
     notas: ''
   };
 }
 
 export default function Apendice4Page({ op, onBack, onSigned }) {
-  const [state, setState] = useState(buildInitialState());
+  const { user } = useAuth();
+  const [state, setState] = useState(buildInitialState(user?.nombre_completo));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [draftStatus, setDraftStatus] = useState(''); // '' | 'guardando...' | 'guardado'
+  const [draftStatus, setDraftStatus] = useState('');
   const draftTimer = useRef(null);
 
-  // Cargar borrador o datos previos firmados al entrar
   useEffect(() => {
     (async () => {
       try {
-        // 1. Intentar cargar firmado del servidor
         const fresh = await api.getOp(op.id);
         const ap4 = fresh.apendices.find(a => String(a.apendice_num) === '4');
         if (ap4) {
           const parsed = typeof ap4.payload_json === 'string'
-            ? JSON.parse(ap4.payload_json)
-            : ap4.payload_json;
+            ? JSON.parse(ap4.payload_json) : ap4.payload_json;
           setState({
             items: parsed.items || buildInitialState().items,
-            map: parsed.map || buildInitialState().map,
+            map: parsed.map || { geografia: null, contingencia: null, grb: null, snapshot: null },
             firma: ap4.firma_dataurl || null,
+            firmanteName: parsed.firmanteName || user?.nombre_completo || '',
             notas: parsed.notas || ''
           });
           setLoading(false);
           return;
         }
-        // 2. Si no hay firmado, intentar borrador local
         const draft = await drafts.loadDraft(op.id, '4');
-        if (draft) setState(draft);
+        if (draft) {
+          setState({
+            ...draft,
+            firmanteName: draft.firmanteName || user?.nombre_completo || ''
+          });
+        }
       } catch (e) {
         setError(e.message);
       } finally {
@@ -136,7 +107,7 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
     })();
   }, [op.id]);
 
-  // Auto-guardado de borrador (debounced 800ms)
+  // Auto-guardado borrador
   useEffect(() => {
     if (loading) return;
     setDraftStatus('guardando...');
@@ -156,12 +127,10 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
   function setItem(code, value) {
     setState(s => {
       const newItems = { ...s.items, [code]: value };
-      // Si un padre 0.4.X cambia a No o N/A, sus hijos se ponen automáticamente a N/A
       const zona = ZONAS_GEOGRAFICAS.find(z => z.code === code);
       if (zona && (value === 'no' || value === 'na')) {
         zona.children.forEach(c => { newItems[c.code] = 'na'; });
       }
-      // Si un padre cambia a Sí, sus hijos se resetean a null para que el piloto los conteste
       if (zona && value === 'si') {
         zona.children.forEach(c => {
           if (newItems[c.code] === 'na') newItems[c.code] = null;
@@ -177,7 +146,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
 
   function validate() {
     const missing = [];
-    // Todos los items de zonas (padres siempre obligatorios; hijos solo si padre = sí)
     ZONAS_GEOGRAFICAS.forEach(z => {
       if (!state.items[z.code]) missing.push(z.code);
       if (state.items[z.code] === 'si') {
@@ -190,6 +158,7 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
       if (!state.items[r.code]) missing.push(r.code);
     });
     if (!state.firma) missing.push('firma');
+    if (!state.firmanteName?.trim()) missing.push('nombre del firmante');
     return missing;
   }
 
@@ -205,6 +174,7 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
       await api.signApendice(op.id, '4', {
         items: state.items,
         map: state.map,
+        firmanteName: state.firmanteName,
         notas: state.notas
       }, state.firma);
       await drafts.deleteDraft(op.id, '4');
@@ -235,7 +205,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-5">
 
-        {/* 0.1 Información de la operación (solo lectura, viene de la op) */}
         <Section title="0.1 Información sobre las operaciones">
           <Field label="Título y/o código" value={op.titulo} />
           <Field label="Descripción y objetivos" value={op.descripcion} />
@@ -245,13 +214,11 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
           <Field label="CONOPS / Categoría" value={op.categoria} />
         </Section>
 
-        {/* 0.2 Escenario */}
         <Section title="0.2 Evaluación del escenario de operaciones">
           <Field label="Dirección" value={op.ubicacion} />
           <Field label="Coordenadas" value={(op.lat && op.lon) ? `${op.lat}, ${op.lon}` : '—'} />
         </Section>
 
-        {/* 0.3 Mapa */}
         <Section title="0.3 Áreas operacionales">
           <p className="text-sm text-slate-600 mb-3">
             Dibuja las áreas operacionales sobre el mapa: <b className="text-emerald-700">geografía de vuelo</b>, <b className="text-orange-700">volumen de contingencia</b> y <b className="text-red-700">GRB</b>. Captura la imagen al terminar para incluirla en el PDF.
@@ -264,7 +231,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
           />
         </Section>
 
-        {/* 0.4 Zonas geográficas */}
         <Section title="0.4 Zonas geográficas de UAS">
           <div className="divide-y divide-slate-100">
             {ZONAS_GEOGRAFICAS.map(zona => (
@@ -291,7 +257,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
           </div>
         </Section>
 
-        {/* 0.6 Requisitos y limitaciones */}
         <Section title="0.6 Requisitos y limitaciones">
           <div className="divide-y divide-slate-100">
             {REQUISITOS.map(r => (
@@ -306,7 +271,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
           </div>
         </Section>
 
-        {/* Notas opcionales */}
         <Section title="Notas adicionales (opcional)">
           <textarea
             value={state.notas}
@@ -317,8 +281,14 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
           />
         </Section>
 
-        {/* Firma */}
         <Section title="0.6.5 Aprobación del responsable de planificación">
+          <Input
+            label="Nombre del firmante"
+            value={state.firmanteName}
+            onChange={(e) => setState(s => ({ ...s, firmanteName: e.target.value }))}
+            placeholder="Ej. Víctor Martínez Prieto"
+            className="mb-3"
+          />
           <SignaturePad
             value={state.firma}
             onChange={(firma) => setState(s => ({ ...s, firma }))}
@@ -332,7 +302,6 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
         )}
       </main>
 
-      {/* Barra inferior fija con estado y botón firmar */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-md z-20">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <span className="text-xs text-slate-500">
