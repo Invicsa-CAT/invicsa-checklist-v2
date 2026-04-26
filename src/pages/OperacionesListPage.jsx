@@ -4,9 +4,11 @@ import { useAuth } from '../contexts/AuthContext';
 import Header from '../components/Header';
 import Button from '../components/Button';
 
+const APENDICES_NUMS = ['4', '5', '6', '11', '14'];
+
 const ESTADO_LABELS = {
-  borrador: { label: 'Borrador', color: 'bg-amber-100 text-amber-800' },
-  firmado:  { label: 'Firmada',  color: 'bg-emerald-100 text-emerald-800' }
+  borrador: { label: 'Borrador', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+  firmado:  { label: 'Firmada',  color: 'bg-emerald-100 text-emerald-800 border-emerald-200' }
 };
 
 export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) {
@@ -45,7 +47,6 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
     return true;
   });
 
-  // Ordenar por fecha desc (más recientes primero)
   const opsOrdenadas = [...opsFiltradas].sort((a, b) => {
     const da = parseFecha(a.fecha);
     const db = parseFecha(b.fecha);
@@ -88,13 +89,9 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
 
           <div className="flex gap-2">
             {isGestor && (
-              <Button variant="secondary" onClick={onGoToAdmin}>
-                Administración
-              </Button>
+              <Button variant="secondary" onClick={onGoToAdmin}>Administración</Button>
             )}
-            <Button onClick={onNewOp}>
-              Nueva operación
-            </Button>
+            <Button onClick={onNewOp}>Nueva operación</Button>
           </div>
         </div>
 
@@ -116,29 +113,9 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
         )}
 
         {!loading && opsOrdenadas.length > 0 && (
-          <div className="bg-white rounded-lg border border-slate-200 divide-y divide-slate-100">
+          <div className="space-y-2">
             {opsOrdenadas.map(op => (
-              <button
-                key={op.id}
-                onClick={() => onOpenOp(op.id)}
-                className="w-full text-left px-4 py-3 hover:bg-slate-50 flex items-center gap-3 transition-colors"
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className="font-mono text-xs text-slate-500">{op.id}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${ESTADO_LABELS[op.estado]?.color || 'bg-slate-100 text-slate-700'}`}>
-                      {ESTADO_LABELS[op.estado]?.label || op.estado}
-                    </span>
-                  </div>
-                  <div className="font-medium text-slate-900 truncate">{op.titulo}</div>
-                  <div className="text-xs text-slate-500 mt-0.5 truncate">
-                    {op.fecha} · {op.piloto_username} · {op.ubicacion || 'Sin ubicación'}
-                  </div>
-                </div>
-                <svg className="w-4 h-4 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
+              <OpCard key={op.id} op={op} onOpen={() => onOpenOp(op.id)} />
             ))}
           </div>
         )}
@@ -147,7 +124,92 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
   );
 }
 
-// Convierte "DD/MM/YYYY" o "YYYY-MM-DD" a timestamp para ordenar
+function OpCard({ op, onOpen }) {
+  const firmados = new Set((op.apendices_firmados || []).map(String));
+  const numFirmados = APENDICES_NUMS.filter(n => firmados.has(n)).length;
+  const fechaLegible = formatFechaLegible(op.fecha);
+  const estado = ESTADO_LABELS[op.estado] || { label: op.estado, color: 'bg-slate-100 text-slate-700 border-slate-200' };
+
+  return (
+    <button
+      onClick={onOpen}
+      className="w-full text-left bg-white rounded-lg border border-slate-200 hover:border-invicsa-300 hover:shadow-sm transition-all p-4 flex items-center gap-4 group"
+    >
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-1 flex-wrap">
+          <span className="font-mono text-xs text-slate-500">{op.id}</span>
+          <span className={`text-xs px-2 py-0.5 rounded-full border ${estado.color}`}>
+            {estado.label}
+          </span>
+        </div>
+
+        <h3 className="font-semibold text-slate-900 mb-1 truncate">{op.titulo}</h3>
+
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          <span className="inline-flex items-center gap-1">
+            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+            </svg>
+            {fechaLegible}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+            </svg>
+            {op.piloto_nombre || op.piloto_username}
+          </span>
+          {op.ubicacion && (
+            <span className="inline-flex items-center gap-1 truncate">
+              <svg className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.828 0l-4.243-4.243a8 8 0 1111.314 0z"/>
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/>
+              </svg>
+              <span className="truncate">{op.ubicacion}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Progreso de los 5 apéndices */}
+        <div className="flex items-center gap-2 mt-2.5">
+          <div className="flex gap-1">
+            {APENDICES_NUMS.map(n => (
+              <div
+                key={n}
+                title={`Apéndice ${n}: ${firmados.has(n) ? 'firmado' : 'pendiente'}`}
+                className={`w-6 h-1.5 rounded-full ${firmados.has(n) ? 'bg-emerald-500' : 'bg-slate-200'}`}
+              />
+            ))}
+          </div>
+          <span className="text-xs text-slate-500">
+            {numFirmados}/{APENDICES_NUMS.length} apéndices
+          </span>
+        </div>
+      </div>
+
+      <svg className="w-5 h-5 text-slate-300 group-hover:text-invicsa-500 flex-shrink-0 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
+      </svg>
+    </button>
+  );
+}
+
+// "2026-04-26" o "26/04/2026" → "26 abr 2026"
+function formatFechaLegible(fecha) {
+  if (!fecha) return '—';
+  const s = String(fecha);
+  let d, m, y;
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    [y, m, d] = s.slice(0, 10).split('-');
+  } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
+    [d, m, y] = s.split('/');
+  } else {
+    return s;
+  }
+  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  const mi = parseInt(m, 10) - 1;
+  return `${parseInt(d, 10)} ${meses[mi] || m} ${y}`;
+}
+
 function parseFecha(f) {
   if (!f) return 0;
   const s = String(f);
