@@ -22,6 +22,7 @@ function buildInitialState(op, pilotoName) {
       { inicio: '', fin: '', descanso_min: '' },
       { inicio: '', fin: '', descanso_min: '' }
     ],
+    total_vuelo_manual: '',  // Si el piloto quiere sobreescribir el calculado
     firma: null,
     firmanteName: pilotoName || ''
   };
@@ -30,6 +31,7 @@ function buildInitialState(op, pilotoName) {
 export default function Apendice14Page({ op, onBack, onSigned }) {
   const { user } = useAuth();
   const [state, setState] = useState(() => buildInitialState(op, user?.nombre_completo));
+  const [tiempoVueloDeAp6, setTiempoVueloDeAp6] = useState(''); // leído del Apéndice 6 si existe
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -40,13 +42,22 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
     (async () => {
       try {
         const fresh = await api.getOp(op.id);
-        const ap = fresh.apendices.find(a => String(a.apendice_num) === '14');
-        if (ap) {
-          const parsed = typeof ap.payload_json === 'string' ? JSON.parse(ap.payload_json) : ap.payload_json;
+        // Buscar tiempo de operación en Apéndice 6 si está firmado
+        const ap6 = fresh.apendices.find(a => String(a.apendice_num) === '6');
+        if (ap6) {
+          const ap6Payload = typeof ap6.payload_json === 'string' ? JSON.parse(ap6.payload_json) : ap6.payload_json;
+          if (ap6Payload?.tiempo_operacion) {
+            setTiempoVueloDeAp6(ap6Payload.tiempo_operacion);
+          }
+        }
+        // Cargar Apéndice 14 si ya existe
+        const ap14 = fresh.apendices.find(a => String(a.apendice_num) === '14');
+        if (ap14) {
+          const parsed = typeof ap14.payload_json === 'string' ? JSON.parse(ap14.payload_json) : ap14.payload_json;
           setState({
             ...buildInitialState(op, user?.nombre_completo),
             ...parsed,
-            firma: ap.firma_dataurl || null
+            firma: ap14.firma_dataurl || null
           });
           setLoading(false);
           return;
@@ -97,7 +108,13 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
   const duracionesActividades = state.actividades.map(a =>
     a.inicio && a.fin ? durationBetween(a.inicio, a.fin) : ''
   );
-  const totalVuelo = sumDurations(duracionesActividades.filter(Boolean));
+  const totalVueloCalculado = sumDurations(duracionesActividades.filter(Boolean));
+
+  // Total horas de vuelo: prioridad
+  // 1. Lo introducido manualmente en el campo total_vuelo_manual.
+  // 2. Lo del Apéndice 6 si existe.
+  // 3. Lo calculado a partir de las actividades.
+  const totalVueloFinal = state.total_vuelo_manual || tiempoVueloDeAp6 || totalVueloCalculado;
 
   function validate() {
     const missing = [];
@@ -105,7 +122,6 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
     if (!state.tripulacion?.trim()) missing.push('tripulación');
     if (!state.inicio_jornada) missing.push('inicio jornada');
     if (!state.fin_jornada) missing.push('fin jornada');
-    // Al menos una actividad completa
     const completas = state.actividades.filter(a => a.inicio && a.fin);
     if (completas.length === 0) missing.push('al menos una actividad');
     if (!state.firma) missing.push('firma');
@@ -123,9 +139,8 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
     setSaving(true);
     try {
       const { firma, ...payload } = state;
-      // Incluimos los totales calculados en el payload para que el PDF los tenga listos
       payload.total_jornada = totalJornada;
-      payload.total_vuelo = totalVuelo;
+      payload.total_vuelo = totalVueloFinal;
       await api.signApendice(op.id, '14', payload, firma);
       await drafts.deleteDraft(op.id, '14');
       onSigned();
@@ -167,18 +182,8 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
 
         <Section title="Registro de jornada">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Input
-              label="Inicio jornada"
-              type="time"
-              value={state.inicio_jornada}
-              onChange={(e) => update('inicio_jornada', e.target.value)}
-            />
-            <Input
-              label="Fin jornada"
-              type="time"
-              value={state.fin_jornada}
-              onChange={(e) => update('fin_jornada', e.target.value)}
-            />
+            <Input label="Inicio jornada" type="time" value={state.inicio_jornada} onChange={(e) => update('inicio_jornada', e.target.value)} />
+            <Input label="Fin jornada" type="time" value={state.fin_jornada} onChange={(e) => update('fin_jornada', e.target.value)} />
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Total</label>
               <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm font-mono text-slate-800">
@@ -195,28 +200,14 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold text-slate-700">Actividad {i + 1}</h3>
                   {state.actividades.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeActividad(i)}
-                      className="text-xs text-red-600 hover:text-red-700"
-                    >
+                    <button type="button" onClick={() => removeActividad(i)} className="text-xs text-red-600 hover:text-red-700">
                       Eliminar
                     </button>
                   )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
-                  <Input
-                    label="Inicio"
-                    type="time"
-                    value={a.inicio}
-                    onChange={(e) => updateActividad(i, 'inicio', e.target.value)}
-                  />
-                  <Input
-                    label="Fin"
-                    type="time"
-                    value={a.fin}
-                    onChange={(e) => updateActividad(i, 'fin', e.target.value)}
-                  />
+                  <Input label="Inicio" type="time" value={a.inicio} onChange={(e) => updateActividad(i, 'inicio', e.target.value)} />
+                  <Input label="Fin" type="time" value={a.fin} onChange={(e) => updateActividad(i, 'fin', e.target.value)} />
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Duración</label>
                     <div className="px-3 py-2 bg-white border border-slate-200 rounded-md text-sm font-mono text-slate-800">
@@ -224,36 +215,45 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
                     </div>
                   </div>
                   {i < state.actividades.length - 1 && (
-                    <Input
-                      label="Descanso siguiente (min)"
-                      type="number"
-                      min="0"
-                      value={a.descanso_min}
-                      onChange={(e) => updateActividad(i, 'descanso_min', e.target.value)}
-                      placeholder="15"
-                    />
+                    <Input label="Descanso siguiente (min)" type="number" min="0" value={a.descanso_min} onChange={(e) => updateActividad(i, 'descanso_min', e.target.value)} placeholder="15" />
                   )}
                 </div>
               </div>
             ))}
-
             {state.actividades.length < MAX_ACTIVIDADES && (
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={addActividad}
-                type="button"
-              >
+              <Button size="sm" variant="secondary" onClick={addActividad} type="button">
                 + Añadir actividad ({state.actividades.length}/{MAX_ACTIVIDADES})
               </Button>
             )}
           </div>
 
-          <div className="mt-4 pt-4 border-t border-slate-200 flex items-center justify-between">
-            <span className="text-sm font-medium text-slate-700">Total horas de vuelo acumuladas:</span>
-            <span className="text-base font-mono font-semibold text-invicsa-900">
-              {totalVuelo || '—'}
-            </span>
+          <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Total horas de vuelo acumuladas:</span>
+              <span className="text-base font-mono font-semibold text-invicsa-900">{totalVueloFinal || '—'}</span>
+            </div>
+            {tiempoVueloDeAp6 && !state.total_vuelo_manual && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                ✓ Auto-rellenado desde el Apéndice 6 (tiempo de operación: {tiempoVueloDeAp6})
+              </p>
+            )}
+            {!tiempoVueloDeAp6 && (
+              <p className="text-xs text-slate-500 italic">
+                💡 Si firmas primero el Apéndice 6 con el tiempo de operación, este campo se rellenará automáticamente.
+              </p>
+            )}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+                Sobreescribir manualmente
+              </summary>
+              <Input
+                label="Total horas de vuelo manual (HH:MM)"
+                type="time"
+                value={state.total_vuelo_manual}
+                onChange={(e) => update('total_vuelo_manual', e.target.value)}
+                className="mt-2"
+              />
+            </details>
           </div>
         </Section>
 
@@ -290,9 +290,7 @@ function Field({ label, value }) {
   return (
     <div>
       <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
-      <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700">
-        {value || '—'}
-      </div>
+      <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700">{value || '—'}</div>
     </div>
   );
 }
