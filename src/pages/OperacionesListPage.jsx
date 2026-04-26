@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as api from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { formatFecha } from '../lib/format';
 import Header from '../components/Header';
 import Button from '../components/Button';
 
@@ -48,8 +49,8 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
   });
 
   const opsOrdenadas = [...opsFiltradas].sort((a, b) => {
-    const da = parseFecha(a.fecha);
-    const db = parseFecha(b.fecha);
+    const da = parseFechaForSort(a.fecha);
+    const db = parseFechaForSort(b.fecha);
     return db - da;
   });
 
@@ -95,9 +96,7 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
           </div>
         </div>
 
-        {loading && (
-          <div className="text-center py-12 text-slate-500">Cargando operaciones...</div>
-        )}
+        {loading && <div className="text-center py-12 text-slate-500">Cargando operaciones...</div>}
 
         {error && (
           <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 mb-4 text-sm">
@@ -127,7 +126,6 @@ export default function OperacionesListPage({ onOpenOp, onNewOp, onGoToAdmin }) 
 function OpCard({ op, onOpen }) {
   const firmados = new Set((op.apendices_firmados || []).map(String));
   const numFirmados = APENDICES_NUMS.filter(n => firmados.has(n)).length;
-  const fechaLegible = formatFechaLegible(op.fecha);
   const estado = ESTADO_LABELS[op.estado] || { label: op.estado, color: 'bg-slate-100 text-slate-700 border-slate-200' };
 
   return (
@@ -150,7 +148,7 @@ function OpCard({ op, onOpen }) {
             <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
             </svg>
-            {fechaLegible}
+            {formatFecha(op.fecha)}
           </span>
           <span className="inline-flex items-center gap-1">
             <svg className="w-3.5 h-3.5 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -169,7 +167,6 @@ function OpCard({ op, onOpen }) {
           )}
         </div>
 
-        {/* Progreso de los 5 apéndices */}
         <div className="flex items-center gap-2 mt-2.5">
           <div className="flex gap-1">
             {APENDICES_NUMS.map(n => (
@@ -193,26 +190,14 @@ function OpCard({ op, onOpen }) {
   );
 }
 
-// "2026-04-26" o "26/04/2026" → "26 abr 2026"
-function formatFechaLegible(fecha) {
-  if (!fecha) return '—';
-  const s = String(fecha);
-  let d, m, y;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-    [y, m, d] = s.slice(0, 10).split('-');
-  } else if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
-    [d, m, y] = s.split('/');
-  } else {
-    return s;
-  }
-  const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-  const mi = parseInt(m, 10) - 1;
-  return `${parseInt(d, 10)} ${meses[mi] || m} ${y}`;
-}
-
-function parseFecha(f) {
+function parseFechaForSort(f) {
   if (!f) return 0;
+  if (f instanceof Date) return f.getTime();
   const s = String(f);
+  if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    const d = new Date(s);
+    return isNaN(d) ? 0 : d.getTime();
+  }
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) {
     const [d, m, y] = s.split('/');
     return new Date(`${y}-${m}-${d}`).getTime();
