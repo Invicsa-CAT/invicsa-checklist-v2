@@ -3,13 +3,17 @@ import * as api from '../lib/api';
 import Header from '../components/Header';
 import Button from '../components/Button';
 import Apendice4Page from './Apendice4Page';
+import Apendice5Page from './Apendice5Page';
+import Apendice6Page from './Apendice6Page';
+import Apendice11Page from './Apendice11Page';
+import Apendice14Page from './Apendice14Page';
 
 const APENDICES = [
-  { num: '4',  label: 'Apéndice 4 — Planificación operacional', implemented: true },
-  { num: '5',  label: 'Apéndice 5 — Verificación prevuelo',     implemented: false },
-  { num: '6',  label: 'Apéndice 6 — Verificación postvuelo',    implemented: false },
-  { num: '11', label: 'Apéndice 11 — Lista verificación RGPD',  implemented: false },
-  { num: '14', label: 'Apéndice 14 — Registro ciclos de trabajo', implemented: false }
+  { num: '4',  label: 'Apéndice 4 — Planificación operacional' },
+  { num: '5',  label: 'Apéndice 5 — Verificación prevuelo' },
+  { num: '6',  label: 'Apéndice 6 — Verificación postvuelo' },
+  { num: '11', label: 'Apéndice 11 — Lista verificación RGPD' },
+  { num: '14', label: 'Apéndice 14 — Registro ciclos de trabajo' }
 ];
 
 export default function OpDetailPage({ opId, onBack }) {
@@ -17,7 +21,7 @@ export default function OpDetailPage({ opId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [finalizing, setFinalizing] = useState(false);
-  const [openAp, setOpenAp] = useState(null); // número del apéndice abierto
+  const [openAp, setOpenAp] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -75,25 +79,24 @@ export default function OpDetailPage({ opId, onBack }) {
   const allFirmados = APENDICES.every(a => firmados.has(a.num));
   const isFinalizada = op.estado === 'firmado';
 
-  // Si hay un apéndice abierto, renderizamos su página
-  if (openAp === '4') {
-    return (
-      <Apendice4Page
-        op={op}
-        onBack={() => setOpenAp(null)}
-        onSigned={async () => {
-          setOpenAp(null);
-          await load();
-        }}
-      />
-    );
-  }
+  // Renderizar el apéndice abierto si lo hay
+  const apProps = {
+    op,
+    onBack: () => setOpenAp(null),
+    onSigned: async () => { setOpenAp(null); await load(); }
+  };
+
+  if (openAp === '4') return <Apendice4Page {...apProps} />;
+  if (openAp === '5') return <Apendice5Page {...apProps} />;
+  if (openAp === '6') return <Apendice6Page {...apProps} />;
+  if (openAp === '11') return <Apendice11Page {...apProps} />;
+  if (openAp === '14') return <Apendice14Page {...apProps} />;
 
   return (
     <div className="min-h-screen">
       <Header
         title={op.titulo}
-        subtitle={`${op.id} · ${op.fecha} · ${op.ubicacion}`}
+        subtitle={`${op.id} · ${op.fecha} · ${op.ubicacion || 'Sin ubicación'}`}
         onBack={onBack}
       />
 
@@ -125,14 +128,11 @@ export default function OpDetailPage({ opId, onBack }) {
                         Firmado por {apendices.find(ap => String(ap.apendice_num) === a.num)?.firmado_por}
                       </div>
                     )}
-                    {!a.implemented && (
-                      <div className="text-xs text-amber-600 italic">Pendiente de implementar (Fase 4)</div>
-                    )}
                   </div>
                   <Button
                     size="sm"
                     variant={firmado ? 'secondary' : 'primary'}
-                    disabled={isFinalizada || !a.implemented}
+                    disabled={isFinalizada}
                     onClick={() => setOpenAp(a.num)}
                   >
                     {firmado ? 'Ver / re-firmar' : 'Cumplimentar'}
@@ -167,10 +167,6 @@ export default function OpDetailPage({ opId, onBack }) {
 
 function formatDate(iso) {
   if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString('es-ES');
-  } catch {
-    return iso;
-  }
+  try { return new Date(iso).toLocaleString('es-ES'); }
+  catch { return iso; }
 }
