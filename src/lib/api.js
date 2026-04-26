@@ -1,10 +1,9 @@
 // Cliente API contra el Apps Script de Google Sheets.
-// Todas las llamadas son POST con body { action, payload, token }.
 
 const API_URL = import.meta.env.VITE_API_URL;
 
 if (!API_URL) {
-  console.error('VITE_API_URL no está configurada. Definir en .env (local) o en Vercel Settings > Environment Variables.');
+  console.error('VITE_API_URL no está configurada.');
 }
 
 const TOKEN_KEY = 'invicsa_session_token';
@@ -30,15 +29,8 @@ function storeSession(token, user) {
   sessionStorage.setItem(USER_KEY, JSON.stringify(user));
 }
 
-/**
- * Llamada genérica al backend.
- * Apps Script con redirect requiere petición simple (sin Content-Type custom),
- * por eso enviamos como text/plain. El servidor parsea JSON igualmente.
- */
 async function call(action, payload = {}) {
-  if (!API_URL) {
-    throw new Error('API_URL no configurada');
-  }
+  if (!API_URL) throw new Error('API_URL no configurada');
   const token = getStoredToken();
   const body = JSON.stringify({ action, payload, token });
 
@@ -60,110 +52,73 @@ async function call(action, payload = {}) {
   try {
     data = await res.json();
   } catch {
-    throw new Error('Respuesta inválida del servidor');
+    throw new Error('Respuesta inválida del servidor (posible límite de tamaño)');
   }
 
   if (!data.ok) {
-    // Si la sesión expiró, limpiamos y propagamos
-    if (data.error && /sesi[oó]n/i.test(data.error)) {
-      clearSession();
-    }
+    if (data.error && /sesi[oó]n/i.test(data.error)) clearSession();
     throw new Error(data.error || 'Error desconocido');
   }
   return data;
 }
 
-// =============================================================================
-// AUTENTICACIÓN
-// =============================================================================
-
+// AUTH
 export async function login(username, password) {
   const data = await call('login', { username, password });
   storeSession(data.token, data.user);
   return data.user;
 }
+export function logout() { clearSession(); }
+export async function ping() { return call('ping'); }
 
-export function logout() {
-  clearSession();
-}
+// CATÁLOGOS
+export async function listUAS() { const d = await call('listUAS'); return d.data; }
+export async function listPilotos() { const d = await call('listPilotos'); return d.data; }
+export async function getConfig() { const d = await call('getConfig'); return d.data; }
 
-export async function ping() {
-  return call('ping');
-}
-
-// =============================================================================
-// CATÁLOGOS (UAS, pilotos, config)
-// =============================================================================
-
-export async function listUAS() {
-  const data = await call('listUAS');
-  return data.data;
-}
-
-export async function listPilotos() {
-  const data = await call('listPilotos');
-  return data.data;
-}
-
-export async function getConfig() {
-  const data = await call('getConfig');
-  return data.data;
-}
-
-// =============================================================================
 // OPERACIONES
-// =============================================================================
-
-export async function listOps(filters = {}) {
-  const data = await call('listOps', filters);
-  return data.data;
-}
-
-export async function getOp(id) {
-  const data = await call('getOp', { id });
-  return data.data; // { op, apendices }
-}
-
-export async function createOp(opData) {
-  const data = await call('createOp', opData);
-  return data.data;
-}
-
-export async function updateOp(id, fields) {
-  return call('updateOp', { id, fields });
-}
+export async function listOps(filters = {}) { const d = await call('listOps', filters); return d.data; }
+export async function getOp(id) { const d = await call('getOp', { id }); return d.data; }
+export async function createOp(opData) { const d = await call('createOp', opData); return d.data; }
+export async function updateOp(id, fields) { return call('updateOp', { id, fields }); }
+export async function finalizarOp(id) { return call('finalizarOp', { id }); }
 
 export async function signApendice(opId, apendiceNum, payloadJson, firmaDataUrl) {
-  const data = await call('signApendice', {
+  const d = await call('signApendice', {
     op_id: opId,
     apendice_num: apendiceNum,
     payload_json: payloadJson,
     firma_dataurl: firmaDataUrl
   });
-  return data.data;
+  return d.data;
 }
 
 export async function uploadPdf(opId, apendiceNum, pdfBase64) {
-  const data = await call('uploadPdf', {
+  const d = await call('uploadPdf', {
     op_id: opId,
     apendice_num: apendiceNum,
     pdf_base64: pdfBase64
   });
-  return data.data;
+  return d.data;
 }
 
-export async function finalizarOp(id) {
-  return call('finalizarOp', { id });
+/**
+ * Sube la imagen del mapa del Apéndice 4 a la carpeta de Drive de la operación.
+ * Devuelve { url, fileId, fileName }.
+ * Esto evita meter una imagen de 1MB+ dentro del payload_json (límite 50K chars/celda).
+ */
+export async function uploadMapSnapshot(opId, imageBase64) {
+  const d = await call('uploadMapSnapshot', {
+    op_id: opId,
+    image_base64: imageBase64
+  });
+  return d.data;
 }
 
-// =============================================================================
-// ADMINISTRACIÓN DE PILOTOS (solo gestor)
-// =============================================================================
-
+// ADMIN
 export async function resetPassword(username, tempPassword) {
   return call('resetPassword', { username, tempPassword });
 }
-
 export async function togglePilotoActivo(username, activo) {
   return call('togglePilotoActivo', { username, activo });
 }
