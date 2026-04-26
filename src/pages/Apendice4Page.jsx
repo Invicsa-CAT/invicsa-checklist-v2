@@ -2,73 +2,87 @@ import { useEffect, useRef, useState } from 'react';
 import * as api from '../lib/api';
 import * as drafts from '../lib/draftStorage';
 import { useAuth } from '../contexts/AuthContext';
-import { formatFecha, formatHora, formatFechaHoras } from '../lib/format';
+import { formatFechaHoras } from '../lib/format';
 import Header from '../components/Header';
 import Button from '../components/Button';
 import Input from '../components/Input';
 import ChecklistItem from '../components/ChecklistItem';
 import MapDrawer from '../components/MapDrawer';
+import ImageUpload from '../components/ImageUpload';
 import SignaturePad from '../components/SignaturePad';
 
+// Numeración oficial Manual de Operaciones edición 9 revisión 10.
+
 const ZONAS_GEOGRAFICAS = [
-  { code: '0.4.1', label: 'Espacio aéreo controlado y FIZ', children: [
-    { code: '0.4.1.1', label: 'Estudio aeronáutico de seguridad con ATSP' }
+  { code: '0.4.1', label: 'Espacio aéreo controlado y zonas de información de vuelo (FIZ)', children: [
+    { code: '0.4.1.1', label: 'Se cuenta con un estudio aeronáutico de seguridad específico coordinado con el ATSP' }
   ]},
-  { code: '0.4.2', label: 'Entorno de aeródromos o helipuertos', children: [
-    { code: '0.4.2.1', label: 'Coordinación previa con el gestor' }
+  { code: '0.4.2', label: 'Entorno de aeródromos o helipuertos, civiles o militares', children: [
+    { code: '0.4.2.1', label: 'Se ha realizado una coordinación previa con el gestor de la infraestructura y proveedor ATS si lo hubiera' }
   ]},
-  { code: '0.4.3', label: 'Zonas prohibidas, restringidas', children: [
-    { code: '0.4.3.1', label: 'Cumple condiciones o cuenta con autorización' }
+  { code: '0.4.3', label: 'Zonas prohibidas, restringidas y asociadas a la gestión flexible del espacio aéreo', children: [
+    { code: '0.4.3.1', label: 'Se cumple con las condiciones y limitaciones o se cuenta con la autorización pertinente del gestor del área' }
   ]},
-  { code: '0.4.4', label: 'Zonas de seguridad militar', children: [
-    { code: '0.4.4.1', label: 'Permiso previo del titular/gestor' }
+  { code: '0.4.4', label: 'Zonas de seguridad militar, de la Defensa Nacional y de la seguridad del Estado', children: [
+    { code: '0.4.4.1', label: 'Se cuenta con permiso previo y expreso del titular de la zona o del gestor responsable' }
   ]},
-  { code: '0.4.5', label: 'Instalaciones de servicios esenciales', children: [
-    { code: '0.4.5.1', label: 'Permiso previo del titular/gestor' }
+  { code: '0.4.5', label: 'Instalaciones que prestan servicios esenciales para la comunidad', children: [
+    { code: '0.4.5.1', label: 'Se cuenta con permiso previo y expreso del titular de la zona o del gestor responsable' }
   ]},
   { code: '0.4.6', label: 'Entornos urbanos', children: [
-    { code: '0.4.6.1a', label: 'Cumple distancias a edificios' },
-    { code: '0.4.6.1b', label: 'Comunicación al Min. Interior (5 días)' }
+    { code: '0.4.6.1a', label: 'Se cumplen con las distancias a edificios determinadas en la declaración operacional o autorización' },
+    { code: '0.4.6.1b', label: 'Se ha realizado la comunicación al Ministerio del Interior al menos con 5 días de antelación a la operación' }
   ]},
-  { code: '0.4.7', label: 'Zona Restringida al Vuelo Fotográfico', children: [
-    { code: '0.4.7.1', label: 'Permiso del CECAF' }
+  { code: '0.4.7', label: 'Zona Restringida al Vuelo Fotográfico (ZRVF)', children: [
+    { code: '0.4.7.1', label: 'Se cuenta con el permiso del CECAF para la toma de imágenes' }
   ]},
   { code: '0.4.8', label: 'Zonas de protección medioambiental', children: [
-    { code: '0.4.8.1', label: 'Coordinación con gestor del espacio' }
+    { code: '0.4.8.1', label: 'Se dispone de coordinación con el gestor del espacio' }
   ]}
 ];
 
-const REQUISITOS = [
-  { code: '0.6.1.1', label: 'Modelo semántico ajustado al CONOPS' },
-  { code: '0.6.1.2', label: 'Geografía y perfil de vuelos definidos' },
-  { code: '0.6.1.3', label: 'Volumen de contingencia definido' },
-  { code: '0.6.1.4', label: 'Margen por riesgo en tierra definido' },
-  { code: '0.6.1.5', label: 'Ubicación de observadores/asistentes' },
-  { code: '0.6.1.6', label: 'Área adyacente definida' },
-  { code: '0.6.1.7', label: 'Densidad de población ajustada al ConOps' },
-  { code: '0.6.2.1', label: 'NOTAMs revisados sin limitaciones' },
-  { code: '0.6.2.2', label: 'Solicitud NOTAM a COOP ENAIRE si procede' }
+const REQUISITOS_HEADER = { code: '0.6.1', label: 'CONOPS y modelo semántico', isHeader: true };
+const REQUISITOS_061 = [
+  { code: '0.6.1.1', label: 'Se aplica e identifica el modelo semántico en la zona de vuelo y este se ajusta al CONOPS autorizado' },
+  { code: '0.6.1.2', label: 'Se define la geografía del vuelo junto con el perfil de vuelos en función del CONOPS (alcance máximo, altura máxima, VLOS/BVLOS...) y los obstáculos y orografía' },
+  { code: '0.6.1.3', label: 'Se define el volumen de contingencia' },
+  { code: '0.6.1.4', label: 'Se define el margen por riesgo en tierra' },
+  { code: '0.6.1.5', label: 'Se planifica la ubicación de observadores y/o asistentes' },
+  { code: '0.6.1.6', label: 'Se define el área adyacente' },
+  { code: '0.6.1.7', label: 'La densidad de población en la geografía de vuelo y el área adyacente se ajustan al ConOps' }
 ];
 
-function buildInitialState(defaultFirmanteName) {
+const REQUISITOS_NOTAM_HEADER = { code: '0.6.2', label: 'NOTAMs', isHeader: true };
+const REQUISITOS_062 = [
+  { code: '0.6.2.1', label: 'Se revisan los NOTAMs activos y no existen limitaciones a la operación' },
+  { code: '0.6.2.2', label: 'Si la operación debe realizarse en TSA o está condicionada a la publicación previa de NOTAM, se solicita al COOP de ENAIRE su promulgación' }
+];
+
+const REQUISITOS_OTRAS = { code: '0.6.4', label: 'Otras limitaciones', isHeader: true };
+
+function buildInitialState(defaultName) {
   const items = {};
   ZONAS_GEOGRAFICAS.forEach(z => {
     items[z.code] = null;
     z.children.forEach(c => { items[c.code] = null; });
   });
-  REQUISITOS.forEach(r => { items[r.code] = null; });
+  REQUISITOS_061.forEach(r => { items[r.code] = null; });
+  REQUISITOS_062.forEach(r => { items[r.code] = null; });
+  items['0.6.4.1'] = null;
   return {
     items,
+    otras_limitaciones_texto: '',
+    enaire_image_url: null,
     map: { geografia: null, contingencia: null, grb: null, snapshotUrl: null },
     firma: null,
-    firmanteName: defaultFirmanteName || '',
+    firmanteName: defaultName || '',
     notas: ''
   };
 }
 
 export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
   const { user } = useAuth();
-  const [op, setOp] = useState(opInitial); // mutable: se actualiza al confirmar zona
+  const [op, setOp] = useState(opInitial);
   const [state, setState] = useState(buildInitialState(user?.nombre_completo));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -80,17 +94,15 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     (async () => {
       try {
         const fresh = await api.getOp(op.id);
-        setOp(fresh.op); // refrescar la op por si lat/lon/ubicacion ya fueron actualizadas
+        setOp(fresh.op);
         const ap4 = fresh.apendices.find(a => String(a.apendice_num) === '4');
         if (ap4) {
-          const parsed = typeof ap4.payload_json === 'string'
-            ? JSON.parse(ap4.payload_json) : ap4.payload_json;
+          const parsed = typeof ap4.payload_json === 'string' ? JSON.parse(ap4.payload_json) : ap4.payload_json;
           setState({
-            items: parsed.items || buildInitialState().items,
-            map: parsed.map || { geografia: null, contingencia: null, grb: null, snapshotUrl: null },
+            ...buildInitialState(user?.nombre_completo),
+            ...parsed,
             firma: ap4.firma_dataurl || null,
-            firmanteName: parsed.firmanteName || user?.nombre_completo || '',
-            notas: parsed.notas || ''
+            firmanteName: parsed.firmanteName || user?.nombre_completo || ''
           });
           setLoading(false);
           return;
@@ -98,9 +110,9 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
         const draft = await drafts.loadDraft(op.id, '4');
         if (draft) {
           setState({
+            ...buildInitialState(user?.nombre_completo),
             ...draft,
-            firmanteName: draft.firmanteName || user?.nombre_completo || '',
-            map: draft.map || { geografia: null, contingencia: null, grb: null, snapshotUrl: null }
+            firmanteName: draft.firmanteName || user?.nombre_completo || ''
           });
         }
       } catch (e) {
@@ -112,7 +124,6 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-guardado borrador
   useEffect(() => {
     if (loading) return;
     setDraftStatus('guardando...');
@@ -122,9 +133,7 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
         await drafts.saveDraft(op.id, '4', state);
         setDraftStatus('guardado');
         setTimeout(() => setDraftStatus(''), 1500);
-      } catch {
-        setDraftStatus('error guardando borrador');
-      }
+      } catch { setDraftStatus('error guardando'); }
     }, 800);
     return () => clearTimeout(draftTimer.current);
   }, [state, loading, op.id]);
@@ -132,6 +141,7 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
   function setItem(code, value) {
     setState(s => {
       const newItems = { ...s.items, [code]: value };
+      // Si un padre 0.4.X cambia a No o N/A, sus hijos se ponen automáticamente a N/A
       const zona = ZONAS_GEOGRAFICAS.find(z => z.code === code);
       if (zona && (value === 'no' || value === 'na')) {
         zona.children.forEach(c => { newItems[c.code] = 'na'; });
@@ -149,16 +159,11 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     return state.items[parentCode] === 'si';
   }
 
-  /**
-   * Cuando el piloto confirma la zona en el mapa, recibimos snapshotUrl, lat, lon y ubicacion.
-   * Actualizamos la operación en el backend para que esos campos queden persistidos
-   * y el resto de apéndices y el PDF tengan acceso a ellos.
-   */
   async function handleZoneConfirmed({ snapshotUrl, lat, lon, ubicacion }) {
     const fields = {};
     if (lat !== null && lat !== undefined) fields.lat = lat.toFixed(5);
     if (lon !== null && lon !== undefined) fields.lon = lon.toFixed(5);
-    if (ubicacion && !op.ubicacion) fields.ubicacion = ubicacion; // solo si no había ya una
+    if (ubicacion && !op.ubicacion) fields.ubicacion = ubicacion;
     if (Object.keys(fields).length === 0) return;
     try {
       await api.updateOp(op.id, fields);
@@ -178,9 +183,8 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
         });
       }
     });
-    REQUISITOS.forEach(r => {
-      if (!state.items[r.code]) missing.push(r.code);
-    });
+    REQUISITOS_061.forEach(r => { if (!state.items[r.code]) missing.push(r.code); });
+    REQUISITOS_062.forEach(r => { if (!state.items[r.code]) missing.push(r.code); });
     if (!state.firma) missing.push('firma');
     if (!state.firmanteName?.trim()) missing.push('nombre del firmante');
     return missing;
@@ -190,18 +194,13 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     setError(null);
     const missing = validate();
     if (missing.length > 0) {
-      setError(`Faltan campos por completar: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`);
+      setError(`Faltan campos: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`);
       return;
     }
     setSaving(true);
     try {
-      // El payload ya NO incluye la imagen embebida, sólo la URL en map.snapshotUrl.
-      await api.signApendice(op.id, '4', {
-        items: state.items,
-        map: state.map,
-        firmanteName: state.firmanteName,
-        notas: state.notas
-      }, state.firma);
+      const { firma, ...payload } = state;
+      await api.signApendice(op.id, '4', payload, firma);
       await drafts.deleteDraft(op.id, '4');
       onSigned();
     } catch (e) {
@@ -220,18 +219,11 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     );
   }
 
-  // Construir personal con observadores
-  const personal = op.observadores
-    ? `${user.nombre_completo}, ${op.observadores}`
-    : user.nombre_completo;
+  const personal = op.observadores ? `${user.nombre_completo}, ${op.observadores}` : user.nombre_completo;
 
   return (
     <div className="min-h-screen pb-24">
-      <Header
-        title="Apéndice 4 — Planificación operacional"
-        subtitle={`${op.id} · ${op.titulo}`}
-        onBack={onBack}
-      />
+      <Header title="Apéndice 4 — Lista de planificación operacional" subtitle={`${op.id} · ${op.titulo}`} onBack={onBack} />
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-5">
 
@@ -241,25 +233,24 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
           <Field label="Fecha y horas previstas" value={formatFechaHoras(op.fecha, op.inicio_hl, op.fin_hl)} />
           <Field label="Personal necesario" value={personal} />
           <Field label="UAS previsto" value={op.uas_id} />
-          <Field label="CONOPS / Categoría" value={op.categoria} />
+          <Field label="Medios materiales / categoría" value={op.categoria} />
         </Section>
 
         <Section title="0.2 Evaluación del escenario de operaciones">
           <Field label="Dirección" value={op.ubicacion} />
-          <Field label="Coordenadas" value={(op.lat && op.lon) ? `${op.lat}, ${op.lon}` : '—'} />
+          <Field label="Coordenadas aprox." value={(op.lat && op.lon) ? `${op.lat}, ${op.lon}` : '—'} />
         </Section>
 
-        <Section title="0.3 Áreas operacionales">
-          <p className="text-sm text-slate-600 mb-3">
-            Dibuja las áreas operacionales sobre el mapa: <b className="text-emerald-700">geografía de vuelo</b>, <b className="text-orange-700">volumen de contingencia</b> y <b className="text-red-700">GRB</b>. Al pulsar "Confirmar zona", se fijan las coordenadas y la ubicación de la operación.
+        <Section title="0.3 Espacio aéreo (ENAIRE Drones)">
+          <p className="text-sm text-slate-600 mb-2">
+            Sube una captura de pantalla del visor de ENAIRE Drones para la zona de operación.
           </p>
-          <MapDrawer
+          <ImageUpload
             opId={op.id}
-            lat={op.lat}
-            lon={op.lon}
-            value={state.map}
-            onChange={(map) => setState(s => ({ ...s, map }))}
-            onZoneConfirmed={handleZoneConfirmed}
+            kind="enaire_drones"
+            label=""
+            value={state.enaire_image_url}
+            onChange={(url) => setState(s => ({ ...s, enaire_image_url: url }))}
           />
         </Section>
 
@@ -289,17 +280,62 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
           </div>
         </Section>
 
-        <Section title="0.6 Requisitos y limitaciones">
+        <Section title="0.5 Zona de vuelo">
+          <p className="text-sm text-slate-600 mb-3">
+            Dibuja sobre el mapa: <b className="text-emerald-700">geografía de vuelo</b>, <b className="text-orange-700">volumen de contingencia</b> y <b className="text-red-700">GRB</b>. Al pulsar "Confirmar zona", se fijan las coordenadas y la ubicación.
+          </p>
+          <MapDrawer
+            opId={op.id}
+            lat={op.lat}
+            lon={op.lon}
+            value={state.map}
+            onChange={(map) => setState(s => ({ ...s, map }))}
+            onZoneConfirmed={handleZoneConfirmed}
+          />
+        </Section>
+
+        <Section title="0.6 Requisitos y limitaciones en la zona de vuelo">
+          <ChecklistItem header code={REQUISITOS_HEADER.code} label={REQUISITOS_HEADER.label} />
           <div className="divide-y divide-slate-100">
-            {REQUISITOS.map(r => (
+            {REQUISITOS_061.map(r => (
               <ChecklistItem
                 key={r.code}
                 code={r.code}
                 label={r.label}
                 value={state.items[r.code]}
                 onChange={(v) => setItem(r.code, v)}
+                indent
               />
             ))}
+          </div>
+
+          <div className="mt-4">
+            <ChecklistItem header code={REQUISITOS_NOTAM_HEADER.code} label={REQUISITOS_NOTAM_HEADER.label} />
+            <div className="divide-y divide-slate-100">
+              {REQUISITOS_062.map(r => (
+                <ChecklistItem
+                  key={r.code}
+                  code={r.code}
+                  label={r.label}
+                  value={state.items[r.code]}
+                  onChange={(v) => setItem(r.code, v)}
+                  indent
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <ChecklistItem header code={REQUISITOS_OTRAS.code} label={REQUISITOS_OTRAS.label} />
+            <div className="pl-6">
+              <textarea
+                value={state.otras_limitaciones_texto}
+                onChange={(e) => setState(s => ({ ...s, otras_limitaciones_texto: e.target.value }))}
+                rows={2}
+                placeholder="Describe otras limitaciones aplicables (opcional)..."
+                className="w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-invicsa-400"
+              />
+            </div>
           </div>
         </Section>
 
@@ -321,32 +357,15 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
             placeholder="Ej. Víctor Martínez Prieto"
             className="mb-3"
           />
-          <SignaturePad
-            value={state.firma}
-            onChange={(firma) => setState(s => ({ ...s, firma }))}
-          />
+          <SignaturePad value={state.firma} onChange={(firma) => setState(s => ({ ...s, firma }))} />
         </Section>
 
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">
-            {error}
-          </div>
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">{error}</div>
         )}
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-md z-20">
-        <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
-          <span className="text-xs text-slate-500">
-            {draftStatus || 'Borrador autoguardado en este dispositivo'}
-          </span>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={onBack} type="button">Volver</Button>
-            <Button onClick={handleSign} loading={saving}>
-              Firmar y guardar
-            </Button>
-          </div>
-        </div>
-      </div>
+      <BottomBar draftStatus={draftStatus} onBack={onBack} onSign={handleSign} saving={saving} />
     </div>
   );
 }
@@ -365,6 +384,20 @@ function Field({ label, value }) {
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 py-1.5 text-sm">
       <span className="text-slate-500">{label}</span>
       <span className="sm:col-span-2 text-slate-800 font-medium">{value || '—'}</span>
+    </div>
+  );
+}
+
+function BottomBar({ draftStatus, onBack, onSign, saving }) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-md z-20">
+      <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+        <span className="text-xs text-slate-500">{draftStatus || 'Borrador autoguardado en este dispositivo'}</span>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={onBack} type="button">Volver</Button>
+          <Button onClick={onSign} loading={saving}>Firmar y guardar</Button>
+        </div>
+      </div>
     </div>
   );
 }
