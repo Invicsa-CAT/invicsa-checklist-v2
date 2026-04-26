@@ -103,16 +103,22 @@ export async function uploadPdf(opId, apendiceNum, pdfBase64) {
 }
 
 /**
- * Sube la imagen del mapa del Apéndice 4 a la carpeta de Drive de la operación.
- * Devuelve { url, fileId, fileName }.
- * Esto evita meter una imagen de 1MB+ dentro del payload_json (límite 50K chars/celda).
+ * Sube una imagen genérica a la carpeta de Drive de la operación.
+ * `kind` identifica el tipo: 'mapa_planificacion', 'enaire_drones', etc.
+ * Sobreescribe si ya existía una imagen del mismo kind para esa operación.
  */
-export async function uploadMapSnapshot(opId, imageBase64) {
-  const d = await call('uploadMapSnapshot', {
+export async function uploadOpImage(opId, imageBase64, kind) {
+  const d = await call('uploadOpImage', {
     op_id: opId,
-    image_base64: imageBase64
+    image_base64: imageBase64,
+    kind
   });
   return d.data;
+}
+
+// Alias de compatibilidad: uploadMapSnapshot llama a uploadOpImage con kind='mapa_planificacion'
+export async function uploadMapSnapshot(opId, imageBase64) {
+  return uploadOpImage(opId, imageBase64, 'mapa_planificacion');
 }
 
 // ADMIN
