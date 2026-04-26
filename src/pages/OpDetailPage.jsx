@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import * as api from '../lib/api';
 import Header from '../components/Header';
 import Button from '../components/Button';
+import Apendice4Page from './Apendice4Page';
 
 const APENDICES = [
-  { num: '4',  label: 'Apéndice 4 — Planificación operacional' },
-  { num: '5',  label: 'Apéndice 5 — Verificación prevuelo' },
-  { num: '6',  label: 'Apéndice 6 — Verificación postvuelo' },
-  { num: '11', label: 'Apéndice 11 — Lista verificación RGPD' },
-  { num: '14', label: 'Apéndice 14 — Registro ciclos de trabajo' }
+  { num: '4',  label: 'Apéndice 4 — Planificación operacional', implemented: true },
+  { num: '5',  label: 'Apéndice 5 — Verificación prevuelo',     implemented: false },
+  { num: '6',  label: 'Apéndice 6 — Verificación postvuelo',    implemented: false },
+  { num: '11', label: 'Apéndice 11 — Lista verificación RGPD',  implemented: false },
+  { num: '14', label: 'Apéndice 14 — Registro ciclos de trabajo', implemented: false }
 ];
 
 export default function OpDetailPage({ opId, onBack }) {
@@ -16,6 +17,7 @@ export default function OpDetailPage({ opId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [finalizing, setFinalizing] = useState(false);
+  const [openAp, setOpenAp] = useState(null); // número del apéndice abierto
 
   async function load() {
     setLoading(true);
@@ -73,6 +75,20 @@ export default function OpDetailPage({ opId, onBack }) {
   const allFirmados = APENDICES.every(a => firmados.has(a.num));
   const isFinalizada = op.estado === 'firmado';
 
+  // Si hay un apéndice abierto, renderizamos su página
+  if (openAp === '4') {
+    return (
+      <Apendice4Page
+        op={op}
+        onBack={() => setOpenAp(null)}
+        onSigned={async () => {
+          setOpenAp(null);
+          await load();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <Header
@@ -109,12 +125,15 @@ export default function OpDetailPage({ opId, onBack }) {
                         Firmado por {apendices.find(ap => String(ap.apendice_num) === a.num)?.firmado_por}
                       </div>
                     )}
+                    {!a.implemented && (
+                      <div className="text-xs text-amber-600 italic">Pendiente de implementar (Fase 4)</div>
+                    )}
                   </div>
                   <Button
                     size="sm"
                     variant={firmado ? 'secondary' : 'primary'}
-                    disabled={isFinalizada}
-                    onClick={() => alert('Apéndice ' + a.num + ' — pendiente de implementar en Fase 3/4')}
+                    disabled={isFinalizada || !a.implemented}
+                    onClick={() => setOpenAp(a.num)}
                   >
                     {firmado ? 'Ver / re-firmar' : 'Cumplimentar'}
                   </Button>
