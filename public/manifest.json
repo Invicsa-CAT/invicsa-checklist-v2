@@ -1,0 +1,17 @@
+{
+  "name": "INVICSA Airtech · Checklists UAS",
+  "short_name": "INVICSA UAS",
+  "description": "Aplicación de checklists operacionales UAS para INVICSA Airtech",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f1f5f9",
+  "theme_color": "#244a6f",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
