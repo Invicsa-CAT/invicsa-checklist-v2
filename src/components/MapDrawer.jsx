@@ -23,24 +23,58 @@ const CAPAS = {
     label: 'Geografía de vuelo',
     color: '#16a34a',
     fillColor: '#16a34a',
-    fillOpacity: 0.25
+    fillOpacity: 0.25,
+    weight: 3
   },
   contingencia: {
     label: 'Volumen de contingencia',
     color: '#ea580c',
     fillColor: '#ea580c',
-    fillOpacity: 0.20
+    fillOpacity: 0.20,
+    weight: 3
   },
   grb: {
     label: 'GRB (riesgo en tierra)',
     color: '#dc2626',
     fillColor: '#dc2626',
-    fillOpacity: 0.18
+    fillOpacity: 0.18,
+    weight: 3
   }
 };
 
+// Capas base disponibles
+function buildBaseLayers() {
+  return {
+    'Callejero': L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap',
+      maxZoom: 19
+    }),
+    'Satélite': L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        attribution: 'Esri World Imagery',
+        maxZoom: 19
+      }
+    ),
+    'Híbrido': L.layerGroup([
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, attribution: 'Esri World Imagery' }
+      ),
+      L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 19, attribution: 'Esri Reference' }
+      )
+    ])
+  };
+}
+
 /**
  * Mapa interactivo con dibujo de 3 polígonos (geografía, contingencia, GRB).
+ * - Permite cambiar entre callejero, satélite e híbrido.
+ * - Los polígonos pueden tener cualquier número de vértices: se cierran haciendo
+ *   click en el primer punto, o usando "Terminar" en la barra de leaflet-draw.
+ *
  * Props:
  *   - lat, lon: centro inicial del mapa
  *   - value: { geografia: GeoJSON|null, contingencia: GeoJSON|null, grb: GeoJSON|null, snapshot: dataURL|null }
@@ -50,7 +84,7 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
   const mapEl = useRef(null);
   const map = useRef(null);
   const layers = useRef({ geografia: null, contingencia: null, grb: null });
-  const [drawingLayer, setDrawingLayer] = useState(null); // 'geografia' | 'contingencia' | 'grb' | null
+  const [drawingLayer, setDrawingLayer] = useState(null);
   const drawHandlerRef = useRef(null);
   const [busy, setBusy] = useState(false);
 
@@ -58,16 +92,17 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
   useEffect(() => {
     if (map.current) return;
     const center = [parseFloat(lat) || 40.4168, parseFloat(lon) || -3.7038];
+
+    const baseLayers = buildBaseLayers();
+
     map.current = L.map(mapEl.current, {
       center,
-      zoom: 15,
-      zoomControl: true
+      zoom: 16,
+      zoomControl: true,
+      layers: [baseLayers['Híbrido']] // por defecto vista híbrida
     });
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19
-    }).addTo(map.current);
+    L.control.layers(baseLayers, null, { position: 'topright', collapsed: false }).addTo(map.current);
 
     // Si hay valores previos, dibujarlos
     Object.keys(CAPAS).forEach(k => {
@@ -85,12 +120,13 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
         map.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Centrar mapa si cambian las coordenadas
   useEffect(() => {
     if (map.current && lat && lon) {
-      map.current.setView([parseFloat(lat), parseFloat(lon)], 15);
+      map.current.setView([parseFloat(lat), parseFloat(lon)], 16);
     }
   }, [lat, lon]);
 
@@ -108,10 +144,19 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
       drawHandlerRef.current = null;
     }
     setDrawingLayer(capa);
+
+    // Configuración explícita: SIN límite de vértices, snap solo al primer punto
     const handler = new L.Draw.Polygon(map.current, {
       shapeOptions: CAPAS[capa],
-      allowIntersection: false,
-      showArea: true
+      allowIntersection: true,
+      showArea: false,        // desactiva cálculo de área (evita warnings)
+      drawError: { color: '#e1e100', message: '' },
+      icon: new L.DivIcon({
+        iconSize: new L.Point(10, 10),
+        className: 'leaflet-div-icon leaflet-editing-icon'
+      }),
+      maxPoints: 0,           // 0 = sin límite (algunas versiones requieren explícito)
+      guidelineDistance: 20
     });
     handler.enable();
     drawHandlerRef.current = handler;
@@ -146,28 +191,31 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
     setDrawingLayer(null);
   }
 
+  function finishDrawing() {
+    // Termina el polígono actual (igual que pulsar "Finish" en la barra de leaflet-draw)
+    if (drawHandlerRef.current && drawHandlerRef.current.completeShape) {
+      drawHandlerRef.current.completeShape();
+    }
+  }
+
   function emitChange() {
     const payload = { geografia: null, contingencia: null, grb: null, snapshot: null };
     Object.keys(layers.current).forEach(k => {
       const lyr = layers.current[k];
       if (lyr) {
-        const gj = lyr.toGeoJSON();
-        // toGeoJSON de un L.Polygon devuelve un Feature; lo guardamos así
-        payload[k] = gj;
+        payload[k] = lyr.toGeoJSON();
       }
     });
     payload.snapshot = value?.snapshot || null;
     onChange?.(payload);
   }
 
-  // Captura de la imagen del mapa para incrustar en el PDF.
-  // Llamar desde el componente padre antes de firmar el apéndice.
   async function captureSnapshot() {
     if (!map.current) return null;
     setBusy(true);
     try {
-      // Pequeña espera para asegurar que las tiles estén renderizadas
-      await new Promise(r => setTimeout(r, 500));
+      // Espera a que las teselas se rendericen (especialmente importante si se acaba de cambiar de capa)
+      await new Promise(r => setTimeout(r, 800));
       const dataUrl = await domtoimage.toPng(mapEl.current, {
         quality: 0.85,
         bgcolor: '#ffffff'
@@ -179,10 +227,6 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
     }
   }
 
-  // Exponemos captureSnapshot al padre via ref (más simple: hook dentro)
-  // Pero como no usamos forwardRef, ofrecemos un botón "Capturar imagen para PDF"
-  // que el usuario debe pulsar antes de firmar.
-
   const hasGeografia = !!layers.current.geografia;
   const hasContingencia = !!layers.current.contingencia;
   const hasGrb = !!layers.current.grb;
@@ -191,14 +235,19 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
     <div className="space-y-3">
       <div
         ref={mapEl}
-        style={{ height: '360px', width: '100%' }}
+        style={{ height: '420px', width: '100%' }}
         className="rounded-md border border-slate-300 overflow-hidden"
       />
 
       {drawingLayer && (
-        <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-sm text-amber-900 flex items-center justify-between">
-          <span>Dibujando <b>{CAPAS[drawingLayer].label}</b>. Toca puntos en el mapa, doble-clic para cerrar.</span>
-          <Button size="sm" variant="ghost" onClick={cancelDrawing} type="button">Cancelar</Button>
+        <div className="bg-amber-50 border border-amber-200 rounded-md px-3 py-2 text-sm text-amber-900 flex items-center justify-between gap-2 flex-wrap">
+          <span>
+            Dibujando <b>{CAPAS[drawingLayer].label}</b>. Toca puntos en el mapa, cierra haciendo clic en el primer punto o pulsando "Terminar".
+          </span>
+          <div className="flex gap-1">
+            <Button size="sm" variant="primary" onClick={finishDrawing} type="button">Terminar</Button>
+            <Button size="sm" variant="ghost" onClick={cancelDrawing} type="button">Cancelar</Button>
+          </div>
         </div>
       )}
 
@@ -224,12 +273,7 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
                   {has ? 'Redibujar' : 'Dibujar'}
                 </Button>
                 {has && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => clearLayer(k)}
-                    type="button"
-                  >
+                  <Button size="sm" variant="ghost" onClick={() => clearLayer(k)} type="button">
                     Borrar
                   </Button>
                 )}
@@ -239,7 +283,7 @@ export default function MapDrawer({ lat, lon, value, onChange }) {
         })}
       </div>
 
-      <div className="flex items-center justify-between gap-3 pt-1">
+      <div className="flex items-center justify-between gap-3 pt-1 flex-wrap">
         <span className="text-xs text-slate-500">
           {hasGeografia && hasContingencia && hasGrb
             ? 'Las 3 áreas dibujadas. Captura la imagen antes de firmar.'
