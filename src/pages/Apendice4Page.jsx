@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import * as api from '../lib/api';
 import * as drafts from '../lib/draftStorage';
 import { useAuth } from '../contexts/AuthContext';
+import { formatFecha, formatHora, formatFechaHoras } from '../lib/format';
 import Header from '../components/Header';
 import Button from '../components/Button';
 import Input from '../components/Input';
@@ -58,15 +59,16 @@ function buildInitialState(defaultFirmanteName) {
   REQUISITOS.forEach(r => { items[r.code] = null; });
   return {
     items,
-    map: { geografia: null, contingencia: null, grb: null, snapshot: null },
+    map: { geografia: null, contingencia: null, grb: null, snapshotUrl: null },
     firma: null,
     firmanteName: defaultFirmanteName || '',
     notas: ''
   };
 }
 
-export default function Apendice4Page({ op, onBack, onSigned }) {
+export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
   const { user } = useAuth();
+  const [op, setOp] = useState(opInitial); // mutable: se actualiza al confirmar zona
   const [state, setState] = useState(buildInitialState(user?.nombre_completo));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,13 +80,14 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
     (async () => {
       try {
         const fresh = await api.getOp(op.id);
+        setOp(fresh.op); // refrescar la op por si lat/lon/ubicacion ya fueron actualizadas
         const ap4 = fresh.apendices.find(a => String(a.apendice_num) === '4');
         if (ap4) {
           const parsed = typeof ap4.payload_json === 'string'
             ? JSON.parse(ap4.payload_json) : ap4.payload_json;
           setState({
             items: parsed.items || buildInitialState().items,
-            map: parsed.map || { geografia: null, contingencia: null, grb: null, snapshot: null },
+            map: parsed.map || { geografia: null, contingencia: null, grb: null, snapshotUrl: null },
             firma: ap4.firma_dataurl || null,
             firmanteName: parsed.firmanteName || user?.nombre_completo || '',
             notas: parsed.notas || ''
@@ -96,7 +99,8 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
         if (draft) {
           setState({
             ...draft,
-            firmanteName: draft.firmanteName || user?.nombre_completo || ''
+            firmanteName: draft.firmanteName || user?.nombre_completo || '',
+            map: draft.map || { geografia: null, contingencia: null, grb: null, snapshotUrl: null }
           });
         }
       } catch (e) {
@@ -105,7 +109,8 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
         setLoading(false);
       }
     })();
-  }, [op.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-guardado borrador
   useEffect(() => {
@@ -144,6 +149,25 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
     return state.items[parentCode] === 'si';
   }
 
+  /**
+   * Cuando el piloto confirma la zona en el mapa, recibimos snapshotUrl, lat, lon y ubicacion.
+   * Actualizamos la operación en el backend para que esos campos queden persistidos
+   * y el resto de apéndices y el PDF tengan acceso a ellos.
+   */
+  async function handleZoneConfirmed({ snapshotUrl, lat, lon, ubicacion }) {
+    const fields = {};
+    if (lat !== null && lat !== undefined) fields.lat = lat.toFixed(5);
+    if (lon !== null && lon !== undefined) fields.lon = lon.toFixed(5);
+    if (ubicacion && !op.ubicacion) fields.ubicacion = ubicacion; // solo si no había ya una
+    if (Object.keys(fields).length === 0) return;
+    try {
+      await api.updateOp(op.id, fields);
+      setOp(prev => ({ ...prev, ...fields }));
+    } catch (e) {
+      console.error('No se pudo actualizar lat/lon/ubicacion:', e.message);
+    }
+  }
+
   function validate() {
     const missing = [];
     ZONAS_GEOGRAFICAS.forEach(z => {
@@ -171,6 +195,7 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
     }
     setSaving(true);
     try {
+      // El payload ya NO incluye la imagen embebida, sólo la URL en map.snapshotUrl.
       await api.signApendice(op.id, '4', {
         items: state.items,
         map: state.map,
@@ -195,6 +220,11 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
     );
   }
 
+  // Construir personal con observadores
+  const personal = op.observadores
+    ? `${user.nombre_completo}, ${op.observadores}`
+    : user.nombre_completo;
+
   return (
     <div className="min-h-screen pb-24">
       <Header
@@ -208,8 +238,8 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
         <Section title="0.1 Información sobre las operaciones">
           <Field label="Título y/o código" value={op.titulo} />
           <Field label="Descripción y objetivos" value={op.descripcion} />
-          <Field label="Fecha y horas previstas" value={`${op.fecha} · ${op.inicio_hl} - ${op.fin_hl} (HL)`} />
-          <Field label="Personal necesario" value={op.observadores ? `${op.piloto_username}, ${op.observadores}` : op.piloto_username} />
+          <Field label="Fecha y horas previstas" value={formatFechaHoras(op.fecha, op.inicio_hl, op.fin_hl)} />
+          <Field label="Personal necesario" value={personal} />
           <Field label="UAS previsto" value={op.uas_id} />
           <Field label="CONOPS / Categoría" value={op.categoria} />
         </Section>
@@ -221,13 +251,15 @@ export default function Apendice4Page({ op, onBack, onSigned }) {
 
         <Section title="0.3 Áreas operacionales">
           <p className="text-sm text-slate-600 mb-3">
-            Dibuja las áreas operacionales sobre el mapa: <b className="text-emerald-700">geografía de vuelo</b>, <b className="text-orange-700">volumen de contingencia</b> y <b className="text-red-700">GRB</b>. Captura la imagen al terminar para incluirla en el PDF.
+            Dibuja las áreas operacionales sobre el mapa: <b className="text-emerald-700">geografía de vuelo</b>, <b className="text-orange-700">volumen de contingencia</b> y <b className="text-red-700">GRB</b>. Al pulsar "Confirmar zona", se fijan las coordenadas y la ubicación de la operación.
           </p>
           <MapDrawer
+            opId={op.id}
             lat={op.lat}
             lon={op.lon}
             value={state.map}
             onChange={(map) => setState(s => ({ ...s, map }))}
+            onZoneConfirmed={handleZoneConfirmed}
           />
         </Section>
 
