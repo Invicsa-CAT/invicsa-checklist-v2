@@ -75,11 +75,11 @@ export default function OpDetailPage({ opId, onBack }) {
   }
 
   const { op, apendices } = data;
-  const firmados = new Set(apendices.map(a => String(a.apendice_num)));
-  const allFirmados = APENDICES.every(a => firmados.has(a.num));
+  const apMap = {};
+  apendices.forEach(a => { apMap[String(a.apendice_num)] = a; });
+  const allFirmados = APENDICES.every(a => apMap[a.num]);
   const isFinalizada = op.estado === 'firmado';
 
-  // Renderizar el apéndice abierto si lo hay
   const apProps = {
     op,
     onBack: () => setOpenAp(null),
@@ -117,26 +117,42 @@ export default function OpDetailPage({ opId, onBack }) {
           <h2 className="text-sm font-semibold text-invicsa-900 uppercase tracking-wide mb-3">Apéndices</h2>
           <ul className="divide-y divide-slate-100">
             {APENDICES.map(a => {
-              const firmado = firmados.has(a.num);
+              const ap = apMap[a.num];
+              const firmado = !!ap;
               return (
-                <li key={a.num} className="py-3 flex items-center gap-3">
+                <li key={a.num} className="py-3 flex items-center gap-3 flex-wrap">
                   <div className={`w-2 h-2 rounded-full flex-shrink-0 ${firmado ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-medium text-slate-900">{a.label}</div>
                     {firmado && (
                       <div className="text-xs text-slate-500">
-                        Firmado por {apendices.find(ap => String(ap.apendice_num) === a.num)?.firmado_por}
+                        Firmado por {ap.firmado_por}
                       </div>
                     )}
                   </div>
-                  <Button
-                    size="sm"
-                    variant={firmado ? 'secondary' : 'primary'}
-                    disabled={isFinalizada}
-                    onClick={() => setOpenAp(a.num)}
-                  >
-                    {firmado ? 'Ver / re-firmar' : 'Cumplimentar'}
-                  </Button>
+                  <div className="flex gap-2 flex-shrink-0">
+                    {firmado && ap.pdf_drive_url && (
+                      <a
+                        href={ap.pdf_drive_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-md border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Abrir PDF
+                      </a>
+                    )}
+                    <Button
+                      size="sm"
+                      variant={firmado ? 'secondary' : 'primary'}
+                      disabled={isFinalizada}
+                      onClick={() => setOpenAp(a.num)}
+                    >
+                      {firmado ? 'Ver / re-firmar' : 'Cumplimentar'}
+                    </Button>
+                  </div>
                 </li>
               );
             })}
@@ -157,7 +173,7 @@ export default function OpDetailPage({ opId, onBack }) {
 
         {!isFinalizada && !allFirmados && (
           <p className="text-xs text-slate-500 text-right">
-            Faltan {APENDICES.filter(a => !firmados.has(a.num)).length} apéndice(s) por firmar
+            Faltan {APENDICES.filter(a => !apMap[a.num]).length} apéndice(s) por firmar
           </p>
         )}
       </main>
