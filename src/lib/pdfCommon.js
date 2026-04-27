@@ -335,35 +335,29 @@ export async function getConfigCached() {
 export function clearConfigCache() { _configCache = null; }
 
 // ============================================================================
-// CARGAR una imagen desde URL pública (Drive) y devolver como Data URL
-// Drive devuelve URLs tipo https://drive.google.com/file/d/{id}/view
-// Necesitamos transformarlas en URLs accesibles desde el navegador.
+// CARGAR una imagen guardada en la carpeta de Drive de una operación.
+// Llama al backend (getOpImageBase64) porque Drive no permite fetch directo
+// desde el navegador por CORS.
+//
+// kind: 'mapa_planificacion' | 'enaire_drones' | etc.
+// Devuelve un Data URL ('data:image/png;base64,XXX') o null si no existe.
 // ============================================================================
-export async function fetchImageAsDataUrl(driveUrl) {
-  if (!driveUrl) return null;
+export async function fetchOpImage(opId, kind) {
+  if (!opId || !kind) return null;
   try {
-    // Extraer fileId del URL típico de Drive: https://drive.google.com/file/d/{id}/view
-    const m = /\/d\/([a-zA-Z0-9_-]+)/.exec(driveUrl);
-    const fileId = m ? m[1] : null;
-    if (!fileId) return null;
-
-    // Endpoint público para visualizar Drive: thumbnail con tamaño grande
-    // Nota: solo funciona si el archivo es accesible (la cuenta del Apps Script
-    // lo crea con permisos de Anyone with link via createFile, así que sí).
-    const url = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1600`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    const data = await api.getOpImageBase64(opId, kind);
+    return data?.dataUrl || null;
   } catch (e) {
-    console.warn('No se pudo cargar imagen de Drive:', e);
+    console.warn(`No se pudo cargar imagen ${kind} de ${opId}:`, e.message);
     return null;
   }
+}
+
+// Alias para compatibilidad con código antiguo. Ya no se usa, pero queda
+// por si quedó alguna referencia colgando.
+export async function fetchImageAsDataUrl(driveUrl) {
+  console.warn('fetchImageAsDataUrl está obsoleta; usa fetchOpImage(opId, kind)');
+  return null;
 }
 
 // ============================================================================
