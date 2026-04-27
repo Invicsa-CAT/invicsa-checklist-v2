@@ -73,11 +73,7 @@ export function drawHeader(doc, config) {
 
   // Logo (escalado proporcionalmente: ratio del logo es 1118/310 ≈ 3.6)
   // Lo pongo en 30 x 8.3 mm
-  try {
-    doc.addImage(LOGO_DATA_URL, 'PNG', PAGE.marginLeft + 2, y + 4.8, 30, 8.3);
-  } catch (e) {
-    // Si falla el logo, dejamos el espacio vacío
-  }
+  safeAddImage(doc, LOGO_DATA_URL, PAGE.marginLeft + 2, y + 4.8, 30, 8.3, '');
 
   // Texto central
   doc.setTextColor(...COLOR.text);
@@ -279,12 +275,7 @@ export function drawSignature(doc, firmaDataUrl, firmanteName, y = null) {
   doc.setLineWidth(0.2);
 
   if (firmaDataUrl) {
-    try {
-      doc.addImage(firmaDataUrl, 'PNG', sigX, actualY + 2, sigW, sigH);
-    } catch (e) {
-      // Si la firma falla, dibujamos un placeholder
-      doc.text('[firma]', sigX + 5, actualY + 12);
-    }
+    safeAddImage(doc, firmaDataUrl, sigX, actualY + 2, sigW, sigH, '[firma]');
   }
 
   // Línea bajo la firma
@@ -373,4 +364,51 @@ export async function fetchImageAsDataUrl(driveUrl) {
     console.warn('No se pudo cargar imagen de Drive:', e);
     return null;
   }
+}
+
+// ============================================================================
+// Detectar formato real de un Data URL (PNG, JPEG, WEBP)
+// El segundo argumento de doc.addImage tiene que coincidir con el formato real
+// del binario; si pasas 'PNG' a un JPEG, jsPDF revienta silenciosamente.
+// ============================================================================
+export function detectImageFormat(dataUrl) {
+  if (!dataUrl) return null;
+  const m = /^data:image\/([a-z]+);base64,/.exec(dataUrl);
+  if (!m) return 'PNG'; // fallback
+  const fmt = m[1].toLowerCase();
+  if (fmt === 'jpeg' || fmt === 'jpg') return 'JPEG';
+  if (fmt === 'png') return 'PNG';
+  if (fmt === 'webp') return 'WEBP';
+  return 'PNG';
+}
+
+// ============================================================================
+// Helper resistente para añadir imágenes: detecta formato, captura errores
+// individualmente y muestra placeholder de texto si falla.
+// Devuelve true si la imagen se insertó, false si falló.
+// ============================================================================
+export function safeAddImage(doc, dataUrl, x, y, w, h, fallbackLabel = '(imagen no disponible)') {
+  if (!dataUrl) {
+    drawImagePlaceholder(doc, x, y, w, h, fallbackLabel);
+    return false;
+  }
+  try {
+    const fmt = detectImageFormat(dataUrl);
+    doc.addImage(dataUrl, fmt, x, y, w, h, undefined, 'FAST');
+    return true;
+  } catch (e) {
+    console.warn(`safeAddImage falló (${fallbackLabel}):`, e);
+    drawImagePlaceholder(doc, x, y, w, h, fallbackLabel);
+    return false;
+  }
+}
+
+function drawImagePlaceholder(doc, x, y, w, h, label) {
+  doc.setDrawColor(...COLOR.border);
+  doc.setFillColor(248, 250, 252); // slate-50
+  doc.rect(x, y, w, h, 'FD');
+  doc.setFont('helvetica', 'italic');
+  doc.setFontSize(9);
+  doc.setTextColor(...COLOR.textMuted);
+  doc.text(label, x + w / 2, y + h / 2, { align: 'center' });
 }
