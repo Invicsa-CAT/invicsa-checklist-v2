@@ -5,7 +5,7 @@ import {
   createDoc, drawHeader, drawApendiceTitle, drawFooters,
   drawHeaderDataTable, drawSectionHeader, drawChecklistTable,
   drawSignature, ensureSpace, docToBase64, getConfigCached,
-  fetchImageAsDataUrl, PAGE, COLOR
+  fetchImageAsDataUrl, safeAddImage, PAGE, COLOR
 } from './pdfCommon';
 import { formatFechaHoras } from './format';
 
@@ -46,13 +46,6 @@ const REQUISITOS_062 = [
   { code: '0.6.2.2', label: 'Si la operación debe realizarse en TSA o está condicionada a la publicación previa de NOTAM, se solicita al COOP de ENAIRE su promulgación', indent: true }
 ];
 
-/**
- * Genera el PDF del Apéndice 4.
- * @param {Object} op - operación completa
- * @param {Object} payload - { items, otras_limitaciones_texto, enaire_image_url, map: { snapshotUrl }, firmanteName, notas }
- * @param {string} firmaDataUrl - imagen de la firma
- * @returns {Promise<string>} - PDF en Base64 (sin prefijo data:)
- */
 export async function generateApendice4PDF(op, payload, firmaDataUrl) {
   const config = await getConfigCached();
   const doc = createDoc();
@@ -80,33 +73,17 @@ export async function generateApendice4PDF(op, payload, firmaDataUrl) {
 
   // Sección 0.3 - Captura de ENAIRE Drones
   y = drawSectionHeader(doc, '0.3', 'ESPACIO AÉREO (ENAIRE Drones)', y + 4);
-  if (payload.enaire_image_url) {
-    const img = await fetchImageAsDataUrl(payload.enaire_image_url);
-    if (img) {
-      y = ensureSpace(doc, y + 2, 70);
-      try {
-        const imgW = 130;
-        const imgH = 70;
-        const x = (PAGE.width - imgW) / 2;
-        doc.addImage(img, 'PNG', x, y, imgW, imgH);
-        y = y + imgH + 4;
-      } catch (e) {
-        doc.setFontSize(9);
-        doc.setTextColor(...COLOR.textMuted);
-        doc.text('(No se pudo embeber la captura de ENAIRE Drones)', PAGE.marginLeft, y + 6);
-        y += 10;
-      }
-    } else {
-      doc.setFontSize(9);
-      doc.setTextColor(...COLOR.textMuted);
-      doc.text('(Captura de ENAIRE Drones no disponible)', PAGE.marginLeft, y + 6);
-      y += 10;
+  y = ensureSpace(doc, y + 2, 76);
+  {
+    const imgW = 130;
+    const imgH = 70;
+    const x = (PAGE.width - imgW) / 2;
+    let imgData = null;
+    if (payload.enaire_image_url) {
+      imgData = await fetchImageAsDataUrl(payload.enaire_image_url);
     }
-  } else {
-    doc.setFontSize(9);
-    doc.setTextColor(...COLOR.textMuted);
-    doc.text('(Sin captura de ENAIRE Drones)', PAGE.marginLeft, y + 6);
-    y += 10;
+    safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin captura de ENAIRE Drones)');
+    y = y + imgH + 4;
   }
 
   // Sección 0.4 Zonas geográficas (checklist)
@@ -117,35 +94,19 @@ export async function generateApendice4PDF(op, payload, firmaDataUrl) {
   }));
   y = drawChecklistTable(doc, zonasItems, y);
 
-  // Sección 0.5 - Mapa
+  // Sección 0.5 - Mapa de zona de vuelo
   y = drawSectionHeader(doc, '0.5', 'ZONA DE VUELO', y + 4);
-  if (payload.map?.snapshotUrl) {
-    const img = await fetchImageAsDataUrl(payload.map.snapshotUrl);
-    if (img) {
-      y = ensureSpace(doc, y + 2, 90);
-      try {
-        const imgW = 140;
-        const imgH = 80;
-        const x = (PAGE.width - imgW) / 2;
-        doc.addImage(img, 'PNG', x, y, imgW, imgH);
-        y = y + imgH + 4;
-      } catch (e) {
-        doc.setFontSize(9);
-        doc.setTextColor(...COLOR.textMuted);
-        doc.text('(No se pudo embeber el mapa)', PAGE.marginLeft, y + 6);
-        y += 10;
-      }
-    } else {
-      doc.setFontSize(9);
-      doc.setTextColor(...COLOR.textMuted);
-      doc.text('(Mapa no disponible)', PAGE.marginLeft, y + 6);
-      y += 10;
+  y = ensureSpace(doc, y + 2, 86);
+  {
+    const imgW = 140;
+    const imgH = 80;
+    const x = (PAGE.width - imgW) / 2;
+    let imgData = null;
+    if (payload.map?.snapshotUrl) {
+      imgData = await fetchImageAsDataUrl(payload.map.snapshotUrl);
     }
-  } else {
-    doc.setFontSize(9);
-    doc.setTextColor(...COLOR.textMuted);
-    doc.text('(Sin mapa de zona de vuelo)', PAGE.marginLeft, y + 6);
-    y += 10;
+    safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin mapa de zona de vuelo)');
+    y = y + imgH + 4;
   }
 
   // Sección 0.6 Requisitos
