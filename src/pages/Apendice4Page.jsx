@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as api from '../lib/api';
 import * as drafts from '../lib/draftStorage';
+import { signAndGeneratePdf } from '../lib/signAndGeneratePdf';
 import { useAuth } from '../contexts/AuthContext';
 import { formatFechaHoras } from '../lib/format';
 import Header from '../components/Header';
@@ -88,6 +89,7 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [draftStatus, setDraftStatus] = useState('');
+  const [pdfStatus, setPdfStatus] = useState('');
   const draftTimer = useRef(null);
 
   useEffect(() => {
@@ -200,11 +202,20 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
     setSaving(true);
     try {
       const { firma, ...payload } = state;
-      await api.signApendice(op.id, '4', payload, firma);
+      const res = await signAndGeneratePdf(op, '4', payload, firma, {
+        onProgress: setPdfStatus
+      });
       await drafts.deleteDraft(op.id, '4');
-      onSigned();
+      if (res.pdfError) {
+        setPdfStatus(`✓ Firmado. Aviso: ${res.pdfError}`);
+        setTimeout(() => onSigned(), 1500);
+      } else {
+        setPdfStatus('✓ Firmado y PDF subido a Drive');
+        setTimeout(() => onSigned(), 800);
+      }
     } catch (e) {
       setError(e.message);
+      setPdfStatus('');
     } finally {
       setSaving(false);
     }
@@ -365,7 +376,7 @@ export default function Apendice4Page({ op: opInitial, onBack, onSigned }) {
         )}
       </main>
 
-      <BottomBar draftStatus={draftStatus} onBack={onBack} onSign={handleSign} saving={saving} />
+      <BottomBar draftStatus={pdfStatus || draftStatus} onBack={onBack} onSign={handleSign} saving={saving} />
     </div>
   );
 }
