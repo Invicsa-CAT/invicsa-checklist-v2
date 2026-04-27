@@ -1,156 +1,319 @@
-// Genera el PDF del Apéndice 4 - Lista de planificación operacional
-// Replica la plantilla oficial del Manual de Operaciones edición 9 / revisión 10.
+import { useEffect, useRef, useState } from 'react';
+import * as api from '../lib/api';
+import * as drafts from '../lib/draftStorage';
+import { signAndGeneratePdf } from '../lib/signAndGeneratePdf';
+import { useAuth } from '../contexts/AuthContext';
+import { formatFecha } from '../lib/format';
+import { durationBetween, sumDurations } from '../lib/timeUtils';
+import Header from '../components/Header';
+import Button from '../components/Button';
+import Input from '../components/Input';
+import SignaturePad from '../components/SignaturePad';
 
-import {
-  createDoc, drawHeader, drawApendiceTitle, drawFooters,
-  drawHeaderDataTable, drawSectionHeader, drawChecklistTable,
-  drawSignature, ensureSpace, docToBase64, getConfigCached,
-  fetchOpImage, safeAddImage, PAGE, COLOR
-} from './pdfCommon';
-import { formatFechaHoras } from './format';
+const MAX_ACTIVIDADES = 4;
 
-const ZONAS_GEOGRAFICAS = [
-  { code: '0.4.1', label: 'Espacio aéreo controlado y zonas de información de vuelo (FIZ)' },
-  { code: '0.4.1.1', label: 'Se cuenta con un estudio aeronáutico de seguridad específico coordinado con el ATSP', indent: true },
-  { code: '0.4.2', label: 'Entorno de aeródromos o helipuertos, civiles o militares' },
-  { code: '0.4.2.1', label: 'Se ha realizado una coordinación previa con el gestor de la infraestructura y proveedor ATS si lo hubiera', indent: true },
-  { code: '0.4.3', label: 'Zonas prohibidas, restringidas y asociadas a la gestión flexible del espacio aéreo' },
-  { code: '0.4.3.1', label: 'Se cumple con las condiciones y limitaciones o se cuenta con la autorización pertinente del gestor del área', indent: true },
-  { code: '0.4.4', label: 'Zonas de seguridad militar, de la Defensa Nacional y de la seguridad del Estado' },
-  { code: '0.4.4.1', label: 'Se cuenta con permiso previo y expreso del titular de la zona o del gestor responsable', indent: true },
-  { code: '0.4.5', label: 'Instalaciones que prestan servicios esenciales para la comunidad' },
-  { code: '0.4.5.1', label: 'Se cuenta con permiso previo y expreso del titular de la zona o del gestor responsable', indent: true },
-  { code: '0.4.6', label: 'Entornos urbanos' },
-  { code: '0.4.6.1a', label: 'Se cumplen con las distancias a edificios determinadas en la declaración operacional o autorización', indent: true },
-  { code: '0.4.6.1b', label: 'Se ha realizado la comunicación al Ministerio del Interior al menos con 5 días de antelación', indent: true },
-  { code: '0.4.7', label: 'Zona Restringida al Vuelo Fotográfico (ZRVF)' },
-  { code: '0.4.7.1', label: 'Se cuenta con el permiso del CECAF para la toma de imágenes', indent: true },
-  { code: '0.4.8', label: 'Zonas de protección medioambiental' },
-  { code: '0.4.8.1', label: 'Se dispone de coordinación con el gestor del espacio', indent: true }
-];
+function buildInitialState(op, pilotoName) {
+  return {
+    nombre: pilotoName || '',
+    puesto: 'Piloto remoto',
+    tripulacion: pilotoName || '',
+    inicio_jornada: '',
+    fin_jornada: '',
+    actividades: [
+      { inicio: '', fin: '', descanso_min: '' },
+      { inicio: '', fin: '', descanso_min: '' }
+    ],
+    total_vuelo_manual: '',  // Si el piloto quiere sobreescribir el calculado
+    firma: null,
+    firmanteName: pilotoName || ''
+  };
+}
 
-const REQUISITOS_061 = [
-  { code: '0.6.1', label: 'CONOPS y modelo semántico', header: true },
-  { code: '0.6.1.1', label: 'Se aplica e identifica el modelo semántico en la zona de vuelo y este se ajusta al CONOPS autorizado', indent: true },
-  { code: '0.6.1.2', label: 'Se define la geografía del vuelo junto con el perfil de vuelos en función del CONOPS', indent: true },
-  { code: '0.6.1.3', label: 'Se define el volumen de contingencia', indent: true },
-  { code: '0.6.1.4', label: 'Se define el margen por riesgo en tierra', indent: true },
-  { code: '0.6.1.5', label: 'Se planifica la ubicación de observadores y/o asistentes', indent: true },
-  { code: '0.6.1.6', label: 'Se define el área adyacente', indent: true },
-  { code: '0.6.1.7', label: 'La densidad de población en la geografía de vuelo y el área adyacente se ajustan al ConOps', indent: true }
-];
+export default function Apendice14Page({ op, onBack, onSigned }) {
+  const { user } = useAuth();
+  const [state, setState] = useState(() => buildInitialState(op, user?.nombre_completo));
+  const [tiempoVueloDeAp6, setTiempoVueloDeAp6] = useState(''); // leído del Apéndice 6 si existe
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [draftStatus, setDraftStatus] = useState('');
+  const [pdfStatus, setPdfStatus] = useState('');
+  const draftTimer = useRef(null);
 
-const REQUISITOS_062 = [
-  { code: '0.6.2', label: 'NOTAMs', header: true },
-  { code: '0.6.2.1', label: 'Se revisan los NOTAMs activos y no existen limitaciones a la operación', indent: true },
-  { code: '0.6.2.2', label: 'Si la operación debe realizarse en TSA o está condicionada a la publicación previa de NOTAM, se solicita al COOP de ENAIRE su promulgación', indent: true }
-];
+  useEffect(() => {
+    (async () => {
+      try {
+        const fresh = await api.getOp(op.id);
+        // Buscar tiempo de operación en Apéndice 6 si está firmado
+        const ap6 = fresh.apendices.find(a => String(a.apendice_num) === '6');
+        if (ap6) {
+          const ap6Payload = typeof ap6.payload_json === 'string' ? JSON.parse(ap6.payload_json) : ap6.payload_json;
+          if (ap6Payload?.tiempo_operacion) {
+            setTiempoVueloDeAp6(ap6Payload.tiempo_operacion);
+          }
+        }
+        // Cargar Apéndice 14 si ya existe
+        const ap14 = fresh.apendices.find(a => String(a.apendice_num) === '14');
+        if (ap14) {
+          const parsed = typeof ap14.payload_json === 'string' ? JSON.parse(ap14.payload_json) : ap14.payload_json;
+          setState({
+            ...buildInitialState(op, user?.nombre_completo),
+            ...parsed,
+            firma: ap14.firma_dataurl || null
+          });
+          setLoading(false);
+          return;
+        }
+        const draft = await drafts.loadDraft(op.id, '14');
+        if (draft) setState({ ...buildInitialState(op, user?.nombre_completo), ...draft });
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-export async function generateApendice4PDF(op, payload, firmaDataUrl) {
-  const config = await getConfigCached();
-  const doc = createDoc();
+  useEffect(() => {
+    if (loading) return;
+    setDraftStatus('guardando...');
+    if (draftTimer.current) clearTimeout(draftTimer.current);
+    draftTimer.current = setTimeout(async () => {
+      try { await drafts.saveDraft(op.id, '14', state); setDraftStatus('guardado'); setTimeout(() => setDraftStatus(''), 1500); }
+      catch { setDraftStatus('error guardando'); }
+    }, 800);
+    return () => clearTimeout(draftTimer.current);
+  }, [state, loading, op.id]);
 
-  drawHeader(doc, config);
-  let y = drawApendiceTitle(doc, 'APÉNDICE 4 - LISTA DE PLANIFICACIÓN OPERACIONAL', 26);
+  function update(field, value) { setState(s => ({ ...s, [field]: value })); }
 
-  // Sección 0.1 Información sobre las operaciones
-  y = drawSectionHeader(doc, '0.1', 'INFORMACIÓN SOBRE LAS OPERACIONES', y);
-  y = drawHeaderDataTable(doc, [
-    ['Título y/o código', op.titulo || ''],
-    ['Descripción y objetivos', op.descripcion || ''],
-    ['Fecha/s y hora/s previstas', formatFechaHoras(op.fecha, op.inicio_hl, op.fin_hl)],
-    ['Personal necesario', op.observadores ? `${payload.firmanteName || op.piloto_username}, ${op.observadores}` : (payload.firmanteName || op.piloto_username || '')],
-    ['UAS previsto', op.uas_id || ''],
-    ['Medios materiales / categoría', op.categoria || '']
-  ], y);
+  function updateActividad(idx, field, value) {
+    setState(s => ({
+      ...s,
+      actividades: s.actividades.map((a, i) => i === idx ? { ...a, [field]: value } : a)
+    }));
+  }
 
-  // Sección 0.2
-  y = drawSectionHeader(doc, '0.2', 'EVALUACIÓN DEL ESCENARIO DE OPERACIONES', y + 4);
-  y = drawHeaderDataTable(doc, [
-    ['Dirección', op.ubicacion || ''],
-    ['Coordenadas aprox.', (op.lat && op.lon) ? `${op.lat}, ${op.lon}` : '']
-  ], y);
+  function addActividad() {
+    if (state.actividades.length >= MAX_ACTIVIDADES) return;
+    setState(s => ({ ...s, actividades: [...s.actividades, { inicio: '', fin: '', descanso_min: '' }] }));
+  }
 
-  // Sección 0.3 - Captura de ENAIRE Drones
-  y = drawSectionHeader(doc, '0.3', 'ESPACIO AÉREO (ENAIRE Drones)', y + 4);
-  y = ensureSpace(doc, y + 2, 76);
-  {
-    const imgW = 130;
-    const imgH = 70;
-    const x = (PAGE.width - imgW) / 2;
-    let imgData = null;
-    if (payload.enaire_image_url) {
-      imgData = await fetchOpImage(op.id, 'enaire_drones');
+  function removeActividad(idx) {
+    if (state.actividades.length <= 1) return;
+    setState(s => ({ ...s, actividades: s.actividades.filter((_, i) => i !== idx) }));
+  }
+
+  // Cálculos derivados
+  const totalJornada = durationBetween(state.inicio_jornada, state.fin_jornada);
+  const duracionesActividades = state.actividades.map(a =>
+    a.inicio && a.fin ? durationBetween(a.inicio, a.fin) : ''
+  );
+  const totalVueloCalculado = sumDurations(duracionesActividades.filter(Boolean));
+
+  // Total horas de vuelo: prioridad
+  // 1. Lo introducido manualmente en el campo total_vuelo_manual.
+  // 2. Lo del Apéndice 6 si existe.
+  // 3. Lo calculado a partir de las actividades.
+  const totalVueloFinal = state.total_vuelo_manual || tiempoVueloDeAp6 || totalVueloCalculado;
+
+  function validate() {
+    const missing = [];
+    if (!state.nombre?.trim()) missing.push('nombre');
+    if (!state.tripulacion?.trim()) missing.push('tripulación');
+    if (!state.inicio_jornada) missing.push('inicio jornada');
+    if (!state.fin_jornada) missing.push('fin jornada');
+    const completas = state.actividades.filter(a => a.inicio && a.fin);
+    if (completas.length === 0) missing.push('al menos una actividad');
+    if (!state.firma) missing.push('firma');
+    if (!state.firmanteName?.trim()) missing.push('nombre del firmante');
+    return missing;
+  }
+
+  async function handleSign() {
+    setError(null);
+    const missing = validate();
+    if (missing.length > 0) {
+      setError(`Faltan campos: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? '...' : ''}`);
+      return;
     }
-    safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin captura de ENAIRE Drones)');
-    y = y + imgH + 4;
-  }
-
-  // Sección 0.4 Zonas geográficas (checklist)
-  y = drawSectionHeader(doc, '0.4', 'ZONAS GEOGRÁFICAS DE UAS', y + 2);
-  const zonasItems = ZONAS_GEOGRAFICAS.map(z => ({
-    ...z,
-    value: payload.items?.[z.code] || null
-  }));
-  y = drawChecklistTable(doc, zonasItems, y);
-
-  // Sección 0.5 - Mapa de zona de vuelo
-  y = drawSectionHeader(doc, '0.5', 'ZONA DE VUELO', y + 4);
-  y = ensureSpace(doc, y + 2, 86);
-  {
-    const imgW = 140;
-    const imgH = 80;
-    const x = (PAGE.width - imgW) / 2;
-    let imgData = null;
-    if (payload.map?.snapshotUrl) {
-      imgData = await fetchOpImage(op.id, 'mapa_planificacion');
+    setSaving(true);
+    try {
+      const { firma, ...payload } = state;
+      payload.total_jornada = totalJornada;
+      payload.total_vuelo = totalVueloFinal;
+      const res = await signAndGeneratePdf(op, '14', payload, firma, { onProgress: setPdfStatus });
+      await drafts.deleteDraft(op.id, '14');
+      if (res.pdfError) {
+        setPdfStatus(`✓ Firmado. Aviso: ${res.pdfError}`);
+        setTimeout(() => onSigned(), 1500);
+      } else {
+        setPdfStatus('✓ Firmado y PDF subido a Drive');
+        setTimeout(() => onSigned(), 800);
+      }
+    } catch (e) {
+      setError(e.message);
+      setPdfStatus('');
+    } finally {
+      setSaving(false);
     }
-    safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin mapa de zona de vuelo)');
-    y = y + imgH + 4;
   }
 
-  // Sección 0.6 Requisitos
-  y = drawSectionHeader(doc, '0.6', 'REQUISITOS Y LIMITACIONES EN LA ZONA DE VUELO', y + 2);
-  const reqsItems = [
-    ...REQUISITOS_061.map(r => ({ ...r, value: payload.items?.[r.code] || null })),
-    ...REQUISITOS_062.map(r => ({ ...r, value: payload.items?.[r.code] || null }))
-  ];
-  y = drawChecklistTable(doc, reqsItems, y);
-
-  // Otras limitaciones (texto libre)
-  if (payload.otras_limitaciones_texto?.trim()) {
-    y = drawSectionHeader(doc, '0.6.4', 'OTRAS LIMITACIONES', y + 4);
-    y = ensureSpace(doc, y + 2, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(...COLOR.text);
-    const textLines = doc.splitTextToSize(
-      payload.otras_limitaciones_texto,
-      PAGE.width - PAGE.marginLeft - PAGE.marginRight - 4
+  if (loading) {
+    return (
+      <div className="min-h-screen">
+        <Header title="Apéndice 14" onBack={onBack} />
+        <div className="text-center py-12 text-slate-500">Cargando...</div>
+      </div>
     );
-    doc.text(textLines, PAGE.marginLeft + 2, y + 4);
-    y = y + 4 + textLines.length * 4;
   }
 
-  // Notas
-  if (payload.notas?.trim()) {
-    y = drawSectionHeader(doc, '', 'NOTAS ADICIONALES', y + 4);
-    y = ensureSpace(doc, y + 2, 20);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(...COLOR.text);
-    const textLines = doc.splitTextToSize(
-      payload.notas,
-      PAGE.width - PAGE.marginLeft - PAGE.marginRight - 4
-    );
-    doc.text(textLines, PAGE.marginLeft + 2, y + 4);
-    y = y + 4 + textLines.length * 4;
-  }
+  return (
+    <div className="min-h-screen pb-24">
+      <Header title="Apéndice 14 — Registro ciclos de trabajo" subtitle={`${op.id} · ${op.titulo}`} onBack={onBack} />
 
-  // Firma
-  y = drawSectionHeader(doc, '0.6.5', 'APROBACIÓN DEL RESPONSABLE DE PLANIFICACIÓN', y + 4);
-  drawSignature(doc, firmaDataUrl, payload.firmanteName);
+      <main className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+        <Section title="Datos del piloto">
+          <Input label="Nombre" value={state.nombre} onChange={(e) => update('nombre', e.target.value)} />
+          <Input label="Puesto" value={state.puesto} onChange={(e) => update('puesto', e.target.value)} />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <Field label="Fecha" value={formatFecha(op.fecha)} />
+            <Field label="Operación" value={op.titulo} />
+          </div>
+          <Input
+            label="Tripulación"
+            value={state.tripulacion}
+            onChange={(e) => update('tripulacion', e.target.value)}
+            placeholder="Listar todos los miembros separados por comas"
+          />
+        </Section>
 
-  drawFooters(doc);
-  return docToBase64(doc);
+        <Section title="Registro de jornada">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <Input label="Inicio jornada" type="time" value={state.inicio_jornada} onChange={(e) => update('inicio_jornada', e.target.value)} />
+            <Input label="Fin jornada" type="time" value={state.fin_jornada} onChange={(e) => update('fin_jornada', e.target.value)} />
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Total</label>
+              <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm font-mono text-slate-800">
+                {totalJornada || '—'}
+              </div>
+            </div>
+          </div>
+        </Section>
+
+        <Section title="Tiempos de actividad y descansos">
+          <div className="space-y-3">
+            {state.actividades.map((a, i) => (
+              <div key={i} className="border border-slate-200 rounded-md p-3 bg-slate-50/50">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-sm font-semibold text-slate-700">Actividad {i + 1}</h3>
+                  {state.actividades.length > 1 && (
+                    <button type="button" onClick={() => removeActividad(i)} className="text-xs text-red-600 hover:text-red-700">
+                      Eliminar
+                    </button>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+                  <Input label="Inicio" type="time" value={a.inicio} onChange={(e) => updateActividad(i, 'inicio', e.target.value)} />
+                  <Input label="Fin" type="time" value={a.fin} onChange={(e) => updateActividad(i, 'fin', e.target.value)} />
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Duración</label>
+                    <div className="px-3 py-2 bg-white border border-slate-200 rounded-md text-sm font-mono text-slate-800">
+                      {duracionesActividades[i] || '—'}
+                    </div>
+                  </div>
+                  {i < state.actividades.length - 1 && (
+                    <Input label="Descanso siguiente (min)" type="number" min="0" value={a.descanso_min} onChange={(e) => updateActividad(i, 'descanso_min', e.target.value)} placeholder="15" />
+                  )}
+                </div>
+              </div>
+            ))}
+            {state.actividades.length < MAX_ACTIVIDADES && (
+              <Button size="sm" variant="secondary" onClick={addActividad} type="button">
+                + Añadir actividad ({state.actividades.length}/{MAX_ACTIVIDADES})
+              </Button>
+            )}
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Total horas de vuelo acumuladas:</span>
+              <span className="text-base font-mono font-semibold text-invicsa-900">{totalVueloFinal || '—'}</span>
+            </div>
+            {tiempoVueloDeAp6 && !state.total_vuelo_manual && (
+              <p className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">
+                ✓ Auto-rellenado desde el Apéndice 6 (tiempo de operación: {tiempoVueloDeAp6})
+              </p>
+            )}
+            {!tiempoVueloDeAp6 && (
+              <p className="text-xs text-slate-500 italic">
+                💡 Si firmas primero el Apéndice 6 con el tiempo de operación, este campo se rellenará automáticamente.
+              </p>
+            )}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-slate-500 hover:text-slate-700">
+                Sobreescribir manualmente
+              </summary>
+              <Input
+                label="Total horas de vuelo manual (HH:MM)"
+                type="time"
+                value={state.total_vuelo_manual}
+                onChange={(e) => update('total_vuelo_manual', e.target.value)}
+                className="mt-2"
+              />
+            </details>
+          </div>
+        </Section>
+
+        <Section title="Firma del piloto">
+          <Input
+            label="Nombre del firmante"
+            value={state.firmanteName}
+            onChange={(e) => update('firmanteName', e.target.value)}
+            className="mb-3"
+          />
+          <SignaturePad value={state.firma} onChange={(firma) => update('firma', firma)} />
+        </Section>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 rounded-md px-4 py-3 text-sm">{error}</div>
+        )}
+      </main>
+
+      <BottomBar draftStatus={pdfStatus || draftStatus} onBack={onBack} onSign={handleSign} saving={saving} />
+    </div>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <section className="bg-white rounded-lg border border-slate-200 p-4 sm:p-5 space-y-3">
+      <h2 className="text-sm font-semibold text-invicsa-900 uppercase tracking-wide">{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+function Field({ label, value }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-slate-700 mb-1">{label}</label>
+      <div className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-md text-sm text-slate-700">{value || '—'}</div>
+    </div>
+  );
+}
+
+function BottomBar({ draftStatus, onBack, onSign, saving }) {
+  return (
+    <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-md z-20">
+      <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
+        <span className="text-xs text-slate-500">{draftStatus || 'Borrador autoguardado en este dispositivo'}</span>
+        <div className="flex gap-2">
+          <Button variant="secondary" onClick={onBack} type="button">Volver</Button>
+          <Button onClick={onSign} loading={saving}>Firmar y guardar</Button>
+        </div>
+      </div>
+    </div>
+  );
 }
