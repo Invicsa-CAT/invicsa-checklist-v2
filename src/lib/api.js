@@ -121,6 +121,16 @@ export async function uploadMapSnapshot(opId, imageBase64) {
   return uploadOpImage(opId, imageBase64, 'mapa_planificacion');
 }
 
+/**
+ * Descarga una imagen de la carpeta de Drive de una operación, devolviéndola
+ * como Data URL (data:image/png;base64,XXX). Necesario porque el navegador
+ * no puede hacer fetch directo a Drive (CORS).
+ */
+export async function getOpImageBase64(opId, kind) {
+  const d = await call('getOpImageBase64', { op_id: opId, kind });
+  return d.data; // { dataUrl, fileName, mime, size }
+}
+
 // ADMIN
 export async function resetPassword(username, tempPassword) {
   return call('resetPassword', { username, tempPassword });
