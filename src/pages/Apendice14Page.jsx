@@ -105,7 +105,7 @@ export default function Apendice14Page({ op, onBack, onSigned }) {
     setState(s => ({ ...s, actividades: s.actividades.filter((_, i) => i !== idx) }));
   }
 
-  // Cálculos derivados
+  // Cálculos derivados 
   const totalJornada = durationBetween(state.inicio_jornada, state.fin_jornada);
   const duracionesActividades = state.actividades.map(a =>
     a.inicio && a.fin ? durationBetween(a.inicio, a.fin) : ''
