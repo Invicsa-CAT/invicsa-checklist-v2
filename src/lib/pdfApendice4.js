@@ -5,7 +5,7 @@ import {
   createDoc, drawHeader, drawApendiceTitle, drawFooters,
   drawHeaderDataTable, drawSectionHeader, drawChecklistTable,
   drawSignature, ensureSpace, docToBase64, getConfigCached,
-  fetchImageAsDataUrl, safeAddImage, PAGE, COLOR
+  fetchOpImage, safeAddImage, PAGE, COLOR
 } from './pdfCommon';
 import { formatFechaHoras } from './format';
 
@@ -80,7 +80,7 @@ export async function generateApendice4PDF(op, payload, firmaDataUrl) {
     const x = (PAGE.width - imgW) / 2;
     let imgData = null;
     if (payload.enaire_image_url) {
-      imgData = await fetchImageAsDataUrl(payload.enaire_image_url);
+      imgData = await fetchOpImage(op.id, 'enaire_drones');
     }
     safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin captura de ENAIRE Drones)');
     y = y + imgH + 4;
@@ -103,7 +103,7 @@ export async function generateApendice4PDF(op, payload, firmaDataUrl) {
     const x = (PAGE.width - imgW) / 2;
     let imgData = null;
     if (payload.map?.snapshotUrl) {
-      imgData = await fetchImageAsDataUrl(payload.map.snapshotUrl);
+      imgData = await fetchOpImage(op.id, 'mapa_planificacion');
     }
     safeAddImage(doc, imgData, x, y, imgW, imgH, '(Sin mapa de zona de vuelo)');
     y = y + imgH + 4;
