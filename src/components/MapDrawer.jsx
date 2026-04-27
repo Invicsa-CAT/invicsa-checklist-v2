@@ -46,19 +46,13 @@ function buildBaseLayers() {
   };
 }
 
-/**
- * Calcula el centroide aproximado de un polígono GeoJSON.
- * No es el centroide geométrico exacto pero suficiente para nuestro propósito.
- */
 function centroidFromGeoJSON(gj) {
   if (!gj) return null;
-  // Si es Feature, extraemos geometry
   const g = gj.type === 'Feature' ? gj.geometry : gj;
   if (!g || g.type !== 'Polygon') return null;
   const coords = g.coordinates?.[0];
   if (!coords || coords.length === 0) return null;
   let sumLng = 0, sumLat = 0, n = 0;
-  // El último punto es el primero repetido (polígono cerrado), lo saltamos
   for (let i = 0; i < coords.length - 1; i++) {
     sumLng += coords[i][0];
     sumLat += coords[i][1];
@@ -68,10 +62,6 @@ function centroidFromGeoJSON(gj) {
   return { lat: sumLat / n, lon: sumLng / n };
 }
 
-/**
- * Geocoding inverso con Nominatim (OpenStreetMap).
- * Sin API key, gratuito, pero limitado a 1 req/segundo. Más que suficiente para nuestro uso.
- */
 async function reverseGeocode(lat, lon) {
   try {
     const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=14&addressdetails=1&accept-language=es`;
@@ -79,7 +69,6 @@ async function reverseGeocode(lat, lon) {
     if (!res.ok) return null;
     const data = await res.json();
     if (!data) return null;
-    // Construimos un nombre legible: "Pueblo (Provincia)"
     const a = data.address || {};
     const lugar = a.town || a.village || a.city || a.hamlet || a.suburb || a.county || data.name;
     const provincia = a.province || a.state || a.county;
@@ -91,20 +80,6 @@ async function reverseGeocode(lat, lon) {
   }
 }
 
-/**
- * Mapa con dibujo de 3 polígonos. Al confirmar la zona:
- *   - Sube el snapshot a Drive (no se almacena en el payload).
- *   - Calcula el centroide del polígono "geografía" → lat/lon de la operación.
- *   - Resuelve el nombre del lugar por geocoding inverso.
- *   - Llama a onZoneConfirmed con { snapshotUrl, lat, lon, ubicacion }.
- *
- * Props:
- *   - opId: ID de la operación (para subir el snapshot a su carpeta de Drive)
- *   - lat, lon: centro inicial del mapa
- *   - value: { geografia, contingencia, grb, snapshotUrl }
- *   - onChange: callback con { geografia, contingencia, grb, snapshotUrl }
- *   - onZoneConfirmed: callback({ snapshotUrl, lat, lon, ubicacion }) tras confirmar
- */
 export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfirmed }) {
   const mapEl = useRef(null);
   const map = useRef(null);
@@ -120,7 +95,9 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
     const baseLayers = buildBaseLayers();
 
     map.current = L.map(mapEl.current, {
-      center, zoom: 16, zoomControl: true,
+      center,
+      zoom: 16,
+      zoomControl: true,
       layers: [baseLayers['Híbrido']]
     });
 
@@ -130,7 +107,11 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
       if (value && value[k]) addPolygonFromGeoJSON(k, value[k]);
     });
 
+    // invalidateSize agresivo para forzar carga de teselas en distintos momentos
+    // (a veces el contenedor cambia de tamaño tras montar y las teselas no se cargan)
     setTimeout(() => map.current?.invalidateSize(), 100);
+    setTimeout(() => map.current?.invalidateSize(), 500);
+    setTimeout(() => map.current?.invalidateSize(), 1500);
 
     return () => {
       if (map.current) { map.current.remove(); map.current = null; }
@@ -141,6 +122,7 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
   useEffect(() => {
     if (map.current && lat && lon) {
       map.current.setView([parseFloat(lat), parseFloat(lon)], 16);
+      setTimeout(() => map.current?.invalidateSize(), 100);
     }
   }, [lat, lon]);
 
@@ -156,14 +138,14 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
       drawHandlerRef.current = null;
     }
     setDrawingLayer(capa);
+
+    // Configuración mínima: solo color del polígono. Por defecto Leaflet-Draw
+    // permite cualquier número de vértices y se cierra al hacer click en el primero
+    // o pulsando "Finish" en la barra de herramientas.
     const handler = new L.Draw.Polygon(map.current, {
       shapeOptions: CAPAS[capa],
       allowIntersection: true,
-      showArea: false,
-      drawError: { color: '#e1e100', message: '' },
-      icon: new L.DivIcon({ iconSize: new L.Point(10, 10), className: 'leaflet-div-icon leaflet-editing-icon' }),
-      maxPoints: 0,
-      guidelineDistance: 20
+      showArea: false
     });
     handler.enable();
     drawHandlerRef.current = handler;
@@ -211,35 +193,25 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
     onChange?.(payload);
   }
 
-  /**
-   * Confirma la zona de operación:
-   * 1. Captura el snapshot del mapa.
-   * 2. Lo sube a Drive.
-   * 3. Calcula centroide de la geografía y resuelve la ubicación.
-   * 4. Llama onZoneConfirmed con todos los datos.
-   */
   async function confirmZone() {
     if (!map.current) return;
     setBusy(true);
     setConfirmStatus('Capturando imagen del mapa...');
     try {
-      // 1. Snapshot
-      await new Promise(r => setTimeout(r, 800));
+      // Espera a que las teselas estén renderizadas
+      await new Promise(r => setTimeout(r, 1000));
       const dataUrl = await domtoimage.toPng(mapEl.current, { quality: 0.85, bgcolor: '#ffffff' });
 
-      // 2. Subir a Drive
       setConfirmStatus('Subiendo a Drive...');
       let snapshotUrl = null;
       try {
-        const res = await api.uploadMapSnapshot(opId, dataUrl);
+        const res = await api.uploadOpImage(opId, dataUrl, 'mapa_planificacion');
         snapshotUrl = res.url;
       } catch (e) {
-        // Si falla la subida, seguimos sin URL pero avisamos
         console.error('Error subiendo snapshot:', e);
         setConfirmStatus('Aviso: imagen no subida (' + e.message + ')');
       }
 
-      // 3. Centroide de la geografía
       let lat = null, lon = null;
       if (layers.current.geografia) {
         const gj = layers.current.geografia.toGeoJSON();
@@ -248,14 +220,12 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
         if (c) { lat = c.lat; lon = c.lon; }
       }
 
-      // 4. Geocoding inverso
       let ubicacion = null;
       if (lat && lon) {
         setConfirmStatus('Resolviendo ubicación...');
         ubicacion = await reverseGeocode(lat, lon);
       }
 
-      // 5. Actualizar el value local con la URL del snapshot
       onChange?.({
         geografia: layers.current.geografia?.toGeoJSON() || null,
         contingencia: layers.current.contingencia?.toGeoJSON() || null,
@@ -263,7 +233,6 @@ export default function MapDrawer({ opId, lat, lon, value, onChange, onZoneConfi
         snapshotUrl
       });
 
-      // 6. Notificar al padre con todo (lat, lon, ubicacion, snapshotUrl)
       onZoneConfirmed?.({ snapshotUrl, lat, lon, ubicacion });
 
       setConfirmStatus('Zona confirmada ✓');
